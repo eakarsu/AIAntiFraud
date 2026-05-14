@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FiCreditCard, FiAlertTriangle, FiShield, FiActivity, FiBarChart2, FiTrendingUp } from 'react-icons/fi';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
 import api from '../api';
 
 const PIE_COLORS = ['#10b981', '#f59e0b', '#ef4444', '#3b82f6'];
@@ -8,6 +8,8 @@ const PIE_COLORS = ['#10b981', '#f59e0b', '#ef4444', '#3b82f6'];
 export default function Dashboard() {
   const [transactions, setTransactions] = useState([]);
   const [alerts, setAlerts] = useState([]);
+  const [dashStats, setDashStats] = useState(null);
+  const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -16,12 +18,17 @@ export default function Dashboard() {
 
   const loadData = async () => {
     try {
-      const [txRes, alertRes] = await Promise.all([
+      const [txRes, alertRes, dashRes] = await Promise.all([
         api.get('/transactions'),
         api.get('/fraud-alerts'),
+        api.get('/dashboard/stats').catch(() => null),
       ]);
       setTransactions(Array.isArray(txRes.data) ? txRes.data : txRes.data?.data || []);
       setAlerts(Array.isArray(alertRes.data) ? alertRes.data : alertRes.data?.data || []);
+      if (dashRes?.data) setDashStats(dashRes.data);
+
+      // Load analytics patterns
+      api.get('/analytics/patterns').then(r => setAnalytics(r.data)).catch(() => null);
     } catch (err) {
       console.error('Dashboard load error:', err);
     } finally {
@@ -138,6 +145,50 @@ export default function Dashboard() {
           </ResponsiveContainer>
         </div>
       </div>
+
+      {/* Alert Volume Trend (30 days) */}
+      {analytics?.dailyTrend && analytics.dailyTrend.length > 0 && (
+        <div className="chart-card" style={{ marginBottom: '16px' }}>
+          <h3>Alert Volume - Last 30 Days</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <AreaChart data={analytics.dailyTrend}>
+              <defs>
+                <linearGradient id="alertGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2d3a4d" />
+              <XAxis dataKey="date" stroke="#64748b" fontSize={11} tickFormatter={v => v?.slice(5)} />
+              <YAxis stroke="#64748b" fontSize={11} />
+              <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', borderRadius: '8px', color: '#f1f5f9' }} />
+              <Area type="monotone" dataKey="totalAlerts" stroke="#3b82f6" fill="url(#alertGrad)" name="Total Alerts" />
+              <Area type="monotone" dataKey="highSeverityAlerts" stroke="#ef4444" fill="none" strokeDasharray="4 2" name="High Severity" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Top Fraud Types bar chart */}
+      {analytics?.alertTypeSummary && analytics.alertTypeSummary.length > 0 && (
+        <div className="chart-card" style={{ marginBottom: '16px' }}>
+          <h3>Top Fraud Types</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={analytics.alertTypeSummary.slice(0, 8)} layout="vertical">
+              <CartesianGrid strokeDasharray="3 3" stroke="#2d3a4d" />
+              <XAxis type="number" stroke="#64748b" fontSize={11} />
+              <YAxis type="category" dataKey="alertType" stroke="#64748b" fontSize={11} width={140} />
+              <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', borderRadius: '8px', color: '#f1f5f9' }} />
+              <Bar dataKey="total" fill="#8b5cf6" radius={[0, 4, 4, 0]} name="Total" />
+            </BarChart>
+          </ResponsiveContainer>
+          {analytics.aiPatternSummary && typeof analytics.aiPatternSummary === 'string' && (
+            <p style={{ marginTop: '12px', color: '#94a3b8', fontSize: '13px', fontStyle: 'italic' }}>
+              AI Pattern Summary: {analytics.aiPatternSummary}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="charts-grid">
         <div className="table-container">

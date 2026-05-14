@@ -1,8 +1,27 @@
 const express = require('express');
+const { body, validationResult } = require('express-validator');
 const { query } = require('../db');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
+
+const VALID_ALERT_TYPES = [
+  'velocity_check', 'amount_threshold', 'location_anomaly', 'behavioral_anomaly',
+  'card_testing', 'account_takeover', 'identity_theft', 'merchant_fraud',
+  'chargeback_abuse', 'synthetic_identity', 'ai_risk_score', 'manual',
+];
+
+const validateFraudAlert = [
+  body('alert_type')
+    .notEmpty().withMessage('alert_type is required')
+    .isIn(VALID_ALERT_TYPES).withMessage(`alert_type must be one of: ${VALID_ALERT_TYPES.join(', ')}`),
+  body('severity')
+    .optional()
+    .isIn(['low', 'medium', 'high', 'critical']).withMessage('severity must be low, medium, high, or critical'),
+  body('amount')
+    .optional()
+    .isFloat({ gt: 0 }).withMessage('amount must be a positive number'),
+];
 
 // GET /api/fraud-alerts
 router.get('/', authenticateToken, async (req, res) => {
@@ -112,7 +131,12 @@ router.get('/:id', authenticateToken, async (req, res) => {
 });
 
 // POST /api/fraud-alerts
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, validateFraudAlert, async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ error: 'Validation Error', errors: errors.array() });
+  }
+
   try {
     const {
       transaction_id,
@@ -123,13 +147,6 @@ router.post('/', authenticateToken, async (req, res) => {
       status = 'open',
       assigned_to,
     } = req.body;
-
-    if (!alert_type) {
-      return res.status(400).json({
-        error: 'Bad Request',
-        message: 'alert_type is required',
-      });
-    }
 
     if (transaction_id) {
       const txCheck = await query('SELECT id FROM transactions WHERE id = $1', [transaction_id]);

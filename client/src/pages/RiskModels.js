@@ -1,7 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { FiPlus, FiEdit2, FiTrash2 } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import api from '../api';
+import Pagination from '../components/Pagination';
+
+const LIMIT = 20;
 
 const emptyForm = {
   name: '', description: '', modelType: 'classification', version: '',
@@ -12,6 +15,7 @@ const emptyForm = {
 
 export default function RiskModels() {
   const [items, setItems] = useState([]);
+  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
@@ -19,15 +23,17 @@ export default function RiskModels() {
   const [editItem, setEditItem] = useState(null);
   const [form, setForm] = useState({ ...emptyForm });
 
-  useEffect(() => { loadItems(); }, []);
-
-  const loadItems = async () => {
+  const loadItems = useCallback(async (page = 1) => {
     try {
-      const res = await api.get('/risk-models');
-      setItems(Array.isArray(res.data) ? res.data : res.data?.data || []);
+      const res = await api.get('/risk-models', { params: { page, limit: LIMIT } });
+      const data = res.data;
+      setItems(Array.isArray(data) ? data : data?.data || []);
+      if (data?.pagination) setPagination({ page: data.pagination.page, totalPages: data.pagination.totalPages, total: data.pagination.total });
     } catch (err) { toast.error('Failed to load risk models'); }
     finally { setLoading(false); }
-  };
+  }, []);
+
+  useEffect(() => { loadItems(1); }, [loadItems]);
 
   const openDetail = (item) => { setSelected(item); setShowDetail(true); };
   const openNew = () => { setEditItem(null); setForm({ ...emptyForm }); setShowForm(true); };
@@ -59,7 +65,7 @@ export default function RiskModels() {
     try {
       await api.delete(`/risk-models/${item._id || item.id}`);
       toast.success('Model deleted');
-      loadItems();
+      loadItems(pagination.page);
     } catch (err) { toast.error('Failed to delete'); }
   };
 
@@ -84,7 +90,7 @@ export default function RiskModels() {
         toast.success('Model created');
       }
       setShowForm(false);
-      loadItems();
+      loadItems(pagination.page);
     } catch (err) { toast.error(err.response?.data?.error || 'Save failed'); }
   };
 
@@ -126,6 +132,13 @@ export default function RiskModels() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          totalItems={pagination.total}
+          limit={LIMIT}
+          onPageChange={(p) => loadItems(p)}
+        />
       </div>
 
       {showDetail && selected && (

@@ -1,7 +1,7 @@
 const express = require('express');
-const axios = require('axios');
 const { query } = require('../db');
 const { authenticateToken } = require('../middleware/auth');
+const { callOpenRouter, parseAIJson, persistAIResult, DEFAULT_MODEL } = require('../aiHelper');
 
 const router = express.Router();
 
@@ -372,13 +372,19 @@ router.post('/:id/analyze', authenticateToken, async (req, res) => {
 
     const tx = txResult.rows[0];
 
-    const systemPrompt = `You are an expert anti-fraud analyst AI. Analyze the given transaction data and provide:
-1. A fraud risk score (0-100)
-2. Risk classification (low/medium/high/critical)
-3. Key fraud indicators found
-4. Recommended action (approve/flag/block)
-5. Detailed reasoning
-Respond in JSON format with fields: risk_score, risk_level, fraud_indicators (array), recommended_action, reasoning.`;
+    const systemPrompt = `You are an expert anti-fraud analyst AI. Analyze the given transaction data and provide a comprehensive fraud risk assessment.
+Respond ONLY with valid JSON containing these fields:
+{
+  "risk_score": 0-100,
+  "risk_level": "low|medium|high|critical",
+  "fraud_probability": 0.0-1.0,
+  "fraud_indicators": ["string array"],
+  "legitimate_indicators": ["string array"],
+  "recommended_action": "approve|flag|block|manual_review",
+  "reasoning": "detailed explanation string",
+  "similar_fraud_patterns": ["known patterns this matches"],
+  "confidence": 0-100
+}`;
 
     const userPrompt = `Analyze this transaction for fraud risk:
 Transaction ID: ${tx.id}
@@ -393,45 +399,33 @@ Current Status: ${tx.status}
 Current Risk Score: ${tx.risk_score || 'unscored'}
 Timestamp: ${tx.created_at}`;
 
-    const aiResponse = await axios.post(
-      'https://openrouter.ai/api/v1/chat/completions',
-      {
-        model: process.env.OPENROUTER_MODEL,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 30000,
-      }
-    );
+    const model = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
+    const analysis = await callOpenRouter(systemPrompt, userPrompt, model);
 
-    let analysisText = aiResponse.data.choices[0].message.content;
-    const jsonMatch = analysisText.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-    if (jsonMatch) analysisText = jsonMatch[1].trim();
-    let analysis;
-    try {
-      analysis = JSON.parse(analysisText);
-    } catch {
-      analysis = { raw_response: analysisText };
-    }
-
-    if (analysis.risk_score) {
+    if (analysis.risk_score != null) {
       await query(
         'UPDATE transactions SET risk_score = $1 WHERE id = $2',
         [analysis.risk_score, tx.id]
       );
     }
 
+    const aiResultId = await persistAIResult({
+      endpoint: 'transactions-analyze',
+      entityType: 'transaction',
+      entityId: tx.id,
+      inputData: { transaction: tx },
+      result: analysis,
+      modelUsed: model,
+      userId: req.user?.id,
+    });
+
     return res.json({
       transaction_id: tx.id,
+      transaction: tx,
       analysis,
-      model_used: process.env.OPENROUTER_MODEL,
+      ai_result_id: aiResultId,
+      model_used: model,
+      analyzed_at: new Date().toISOString(),
     });
   } catch (err) {
     if (err.response) {

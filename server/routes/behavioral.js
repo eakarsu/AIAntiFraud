@@ -1,7 +1,7 @@
 const express = require('express');
-const axios = require('axios');
 const { query } = require('../db');
 const { authenticateToken } = require('../middleware/auth');
+const { callOpenRouter, persistAIResult, DEFAULT_MODEL } = require('../aiHelper');
 
 const router = express.Router();
 
@@ -220,7 +220,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// POST /api/behavioral/:id/analyze
+// POST /api/behavioral-patterns/:id/analyze
 router.post('/:id/analyze', authenticateToken, async (req, res) => {
   try {
     const bpResult = await query('SELECT * FROM behavioral_patterns WHERE id = $1', [req.params.id]);
@@ -231,13 +231,21 @@ router.post('/:id/analyze', authenticateToken, async (req, res) => {
 
     const bp = bpResult.rows[0];
 
-    const systemPrompt = `You are an expert behavioral fraud analyst AI. Analyze the given customer behavioral pattern and provide:
-1. Anomaly assessment (normal, suspicious, high_risk, critical)
-2. Behavioral anomalies detected
-3. Risk indicators with explanations
-4. Recommended actions (monitor, investigate, restrict, block)
-5. Pattern comparison analysis
-Respond in JSON format with fields: anomaly_level, anomalies_detected (array), risk_indicators (array of objects with indicator and explanation), recommended_action, pattern_analysis, confidence_score (0-100).`;
+    const systemPrompt = `You are an expert behavioral fraud analyst AI. Analyze the customer behavioral pattern data to detect anomalies and assess risk.
+Respond ONLY with valid JSON:
+{
+  "anomaly_level": "normal|mild|moderate|severe|critical",
+  "anomaly_score": 0-100,
+  "detected_anomalies": [{"type": "string", "description": "string", "severity": "low|medium|high|critical"}],
+  "behavioral_risk_factors": ["string array"],
+  "normal_behavior_indicators": ["string array"],
+  "pattern_classification": "legitimate|suspicious|fraudulent",
+  "recommended_action": "no_action|monitor|investigate|restrict_account|freeze_account",
+  "temporal_analysis": {"peak_hours": "string", "unusual_times": "string", "pattern": "string"},
+  "geographic_analysis": {"typical_regions": "string", "anomalies": "string"},
+  "device_analysis": {"device_count": 0, "anomalies": "string"},
+  "confidence": 0-100
+}`;
 
     const userPrompt = `Analyze this customer behavioral pattern:
 Customer ID: ${bp.customer_id}
@@ -250,46 +258,35 @@ Device Fingerprints: ${JSON.stringify(bp.device_fingerprints)}
 Current Anomaly Score: ${bp.anomaly_score}
 Last Updated: ${bp.last_updated}`;
 
-    const aiResponse = await axios.post(
-      'https://openrouter.ai/api/v1/chat/completions',
-      {
-        model: process.env.OPENROUTER_MODEL,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 30000,
-      }
-    );
+    const model = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
+    const analysis = await callOpenRouter(systemPrompt, userPrompt, model);
 
-    let analysisText = aiResponse.data.choices[0].message.content;
-    const jsonMatch = analysisText.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-    if (jsonMatch) analysisText = jsonMatch[1].trim();
-    let analysis;
-    try {
-      analysis = JSON.parse(analysisText);
-    } catch {
-      analysis = { raw_response: analysisText };
-    }
-
-    if (analysis.confidence_score) {
+    // Update anomaly_score from AI's anomaly_score field (not confidence)
+    if (analysis.anomaly_score != null) {
       await query(
         'UPDATE behavioral_patterns SET anomaly_score = $1 WHERE id = $2',
-        [analysis.confidence_score, bp.id]
+        [Math.min(100, Math.max(0, parseFloat(analysis.anomaly_score))), bp.id]
       );
     }
+
+    const aiResultId = await persistAIResult({
+      endpoint: 'behavioral-analyze',
+      entityType: 'behavioral_pattern',
+      entityId: bp.id,
+      inputData: { pattern: bp },
+      result: analysis,
+      modelUsed: model,
+      userId: req.user?.id,
+    });
 
     return res.json({
       pattern_id: bp.id,
       customer_id: bp.customer_id,
+      pattern: bp,
       analysis,
-      model_used: process.env.OPENROUTER_MODEL,
+      ai_result_id: aiResultId,
+      model_used: model,
+      analyzed_at: new Date().toISOString(),
     });
   } catch (err) {
     if (err.response) {

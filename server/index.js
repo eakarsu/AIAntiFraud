@@ -1,6 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const authRoutes = require('./routes/auth');
 const transactionRoutes = require('./routes/transactions');
@@ -14,35 +16,88 @@ const behavioralRoutes = require('./routes/behavioral');
 const merchantRoutes = require('./routes/merchants');
 const dashboardRoutes = require('./routes/dashboard');
 const aiRoutes = require('./routes/ai');
+const analyticsRoutes = require('./routes/analytics');
+const usersRoutes = require('./routes/users');
+const ruleSuggestionsRoutes = require('./routes/ruleSuggestions');
+const casesRoutes = require('./routes/cases');
+const chargebacksRoutes = require('./routes/chargebacks');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Security headers
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: false, // Allow API to be consumed by any client
+}));
+
+// Rate limiting
+const aiRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 20,
+  keyGenerator: (req) => {
+    const authHeader = req.headers.authorization;
+    if (authHeader) return authHeader;
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    return ip.replace(/^::ffff:/, '');
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { xForwardedForHeader: false, ipKeyGenerator: false },
+  message: { error: 'Too Many Requests', message: 'AI rate limit exceeded. Maximum 20 AI requests per hour.' },
+});
+
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100,
+  keyGenerator: (req) => {
+    const authHeader = req.headers.authorization;
+    if (authHeader) return authHeader;
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    return ip.replace(/^::ffff:/, '');
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { xForwardedForHeader: false, ipKeyGenerator: false },
+  message: { error: 'Too Many Requests', message: 'Rate limit exceeded. Maximum 100 requests per 15 minutes.' },
+});
+
+// CORS
+const allowedOrigins = process.env.CLIENT_URL
+  ? [process.env.CLIENT_URL]
+  : ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174'];
+
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174'],
+  origin: allowedOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
+// Request logging
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] ${req.method} ${req.originalUrl} - IP: ${req.ip}`);
   next();
 });
 
+// Health check (no rate limit, no auth)
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     service: 'Anti-Fraud & Credit Analysis Engine',
-    version: '1.0.0',
+    version: '2.0.0',
   });
 });
 
+// Apply general rate limiter to all API routes
+app.use('/api/', generalLimiter);
+
+// Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/fraud-rules', fraudRuleRoutes);
@@ -54,8 +109,14 @@ app.use('/api/audit-log', auditLogRoutes);
 app.use('/api/behavioral-patterns', behavioralRoutes);
 app.use('/api/merchant-profiles', merchantRoutes);
 app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/ai', aiRoutes);
+app.use('/api/ai', aiRateLimiter, aiRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/users', usersRoutes);
+app.use('/api/rule-suggestions', ruleSuggestionsRoutes);
+app.use('/api/cases', casesRoutes);
+app.use('/api/chargebacks', chargebacksRoutes);
 
+// 404 handler
 app.use((req, res) => {
   res.status(404).json({
     error: 'Not Found',
@@ -64,6 +125,7 @@ app.use((req, res) => {
   });
 });
 
+// Error handler
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
   const status = err.status || err.statusCode || 500;
@@ -77,7 +139,24 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`Anti-Fraud Engine API running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`Health check: http://localhost:${PORT}/health`);
+  console.log(`Health check: http://localhost:${PORT}/api/health`);
 });
 
 module.exports = app;
+
+// BATCH_00_AUDIT_MOUNTS
+app.use('/api/graph-anomaly', require('./routes/graphAnomaly'));
+app.use('/api/behavioral-biometrics', require('./routes/behavioralBiometrics'));
+app.use('/api/ml-rule-auto', require('./routes/mlRuleAuto'));
+app.use('/api/card-network-feed', require('./routes/cardNetworkFeed'));
+app.use('/api/cross-merchant-fraud', require('./routes/crossMerchantFraud'));
+
+// === Batch 00 Gaps & Frontend Mounts ===
+app.use('/api/gap-ai-velocity-rule-learning-rapid', require('./routes/gap_ai_velocity_rule_learning_rapid'));
+app.use('/api/gap-ai-money-mule-cash-out', require('./routes/gap_ai_money_mule_cash_out'));
+app.use('/api/gap-ai-synthetic-identity-detection', require('./routes/gap_ai_synthetic_identity_detection'));
+app.use('/api/gap-ai-explainability-risk-score-outputs', require('./routes/gap_ai_explainability_risk_score_outputs'));
+app.use('/api/gap-payment-network-integration-visa-mastercard', require('./routes/gap_payment_network_integration_visa_mastercard'));
+app.use('/api/gap-biometric-device-fingerprint-verification', require('./routes/gap_biometric_device_fingerprint_verification'));
+app.use('/api/gap-notifications-subsystem', require('./routes/gap_notifications_subsystem'));
+app.use('/api/gap-outbound-webhooks-siem-soc-integration', require('./routes/gap_outbound_webhooks_siem_soc_integration'));

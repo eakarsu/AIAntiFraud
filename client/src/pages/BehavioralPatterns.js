@@ -1,8 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { FiPlus, FiEdit2, FiTrash2, FiCpu } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import api from '../api';
 import AIResultsDisplay from '../components/AIResultsDisplay';
+import Pagination from '../components/Pagination';
+
+const LIMIT = 20;
 
 function getRiskClass(score) {
   if (score == null) return '';
@@ -22,6 +25,7 @@ const emptyForm = {
 
 export default function BehavioralPatterns() {
   const [items, setItems] = useState([]);
+  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
@@ -31,15 +35,18 @@ export default function BehavioralPatterns() {
   const [aiResult, setAiResult] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
 
-  useEffect(() => { loadItems(); }, []);
-
-  const loadItems = async () => {
+  const loadItems = useCallback(async (page = 1) => {
+    setLoading(true);
     try {
-      const res = await api.get('/behavioral-patterns');
-      setItems(Array.isArray(res.data) ? res.data : res.data?.data || []);
+      const res = await api.get('/behavioral-patterns', { params: { page, limit: LIMIT } });
+      const data = res.data;
+      setItems(data.data || []);
+      if (data.pagination) setPagination({ page: data.pagination.page, totalPages: data.pagination.totalPages, total: data.pagination.total });
     } catch (err) { toast.error('Failed to load behavioral patterns'); }
     finally { setLoading(false); }
-  };
+  }, []);
+
+  useEffect(() => { loadItems(1); }, [loadItems]);
 
   const openDetail = (item) => { setSelected(item); setAiResult(null); setShowDetail(true); };
   const openNew = () => { setEditItem(null); setForm({ ...emptyForm }); setShowForm(true); };
@@ -68,36 +75,35 @@ export default function BehavioralPatterns() {
     e.stopPropagation();
     if (!window.confirm('Delete this pattern?')) return;
     try {
-      await api.delete(`/behavioral-patterns/${item._id || item.id}`);
+      await api.delete(`/behavioral-patterns/${item.id}`);
       toast.success('Pattern deleted');
-      loadItems();
+      loadItems(pagination.page);
     } catch (err) { toast.error('Failed to delete'); }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     const payload = {
-      ...form,
-      avgTransactionAmount: parseFloat(form.avgTransactionAmount) || 0,
-      maxTransactionAmount: parseFloat(form.maxTransactionAmount) || 0,
-      minTransactionAmount: parseFloat(form.minTransactionAmount) || 0,
-      transactionFrequency: parseFloat(form.transactionFrequency) || 0,
-      anomalyScore: parseFloat(form.anomalyScore) || 0,
-      avgDailyTransactions: parseFloat(form.avgDailyTransactions) || 0,
-      typicalMerchants: form.typicalMerchants ? form.typicalMerchants.split(',').map(s => s.trim()).filter(Boolean) : [],
-      typicalLocations: form.typicalLocations ? form.typicalLocations.split(',').map(s => s.trim()).filter(Boolean) : [],
+      customer_id: form.customerId,
+      pattern_type: form.patternType,
+      avg_transaction_amount: parseFloat(form.avgTransactionAmount) || undefined,
+      max_transaction_amount: parseFloat(form.maxTransactionAmount) || undefined,
+      anomaly_score: form.anomalyScore !== '' ? parseFloat(form.anomalyScore) : undefined,
+      typical_locations: form.typicalLocations ? form.typicalLocations.split(',').map(s => s.trim()).filter(Boolean) : [],
+      typical_times: {},
+      device_fingerprints: [],
     };
     try {
       if (editItem) {
-        await api.put(`/behavioral-patterns/${editItem._id || editItem.id}`, payload);
+        await api.put(`/behavioral-patterns/${editItem.id}`, payload);
         toast.success('Pattern updated');
       } else {
         await api.post('/behavioral-patterns', payload);
         toast.success('Pattern created');
       }
       setShowForm(false);
-      loadItems();
-    } catch (err) { toast.error(err.response?.data?.error || 'Save failed'); }
+      loadItems(pagination.page);
+    } catch (err) { toast.error(err.response?.data?.message || 'Save failed'); }
   };
 
   const runAiAnalysis = async () => {
@@ -105,7 +111,7 @@ export default function BehavioralPatterns() {
     setAiLoading(true);
     setAiResult(null);
     try {
-      const res = await api.post(`/behavioral-patterns/${selected._id || selected.id}/analyze`);
+      const res = await api.post(`/behavioral-patterns/${selected.id}/analyze`);
       setAiResult(res.data);
     } catch (err) { toast.error('AI analysis failed'); }
     finally { setAiLoading(false); }
@@ -132,7 +138,7 @@ export default function BehavioralPatterns() {
               {items.length === 0 ? (
                 <tr><td colSpan="7" style={{ textAlign: 'center', padding: '40px' }}>No behavioral patterns found</td></tr>
               ) : items.map(b => (
-                <tr key={b._id || b.id} onClick={() => openDetail(b)}>
+                <tr key={b.id} onClick={() => openDetail(b)}>
                   <td>{(b.customerId || '-').toString().slice(-8)}</td>
                   <td>{b.patternType || '-'}</td>
                   <td>${parseFloat(b.avgTransactionAmount || 0).toLocaleString()}</td>
@@ -148,6 +154,13 @@ export default function BehavioralPatterns() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          totalItems={pagination.total}
+          limit={LIMIT}
+          onPageChange={(p) => loadItems(p)}
+        />
       </div>
 
       {showDetail && selected && (

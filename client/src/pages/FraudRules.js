@@ -1,7 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { FiPlus, FiEdit2, FiTrash2 } from 'react-icons/fi';
+import React, { useState, useEffect, useCallback } from 'react';
+import { FiPlus, FiEdit2, FiTrash2, FiCpu, FiCheckCircle, FiXCircle } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import api from '../api';
+import Pagination from '../components/Pagination';
+
+const LIMIT = 20;
 
 const emptyForm = {
   name: '', description: '', ruleType: 'velocity', condition: '',
@@ -11,6 +14,7 @@ const emptyForm = {
 
 export default function FraudRules() {
   const [items, setItems] = useState([]);
+  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
@@ -18,15 +22,17 @@ export default function FraudRules() {
   const [editItem, setEditItem] = useState(null);
   const [form, setForm] = useState({ ...emptyForm });
 
-  useEffect(() => { loadItems(); }, []);
-
-  const loadItems = async () => {
+  const loadItems = useCallback(async (page = 1) => {
     try {
-      const res = await api.get('/fraud-rules');
-      setItems(Array.isArray(res.data) ? res.data : res.data?.data || []);
+      const res = await api.get('/fraud-rules', { params: { page, limit: LIMIT } });
+      const data = res.data;
+      setItems(Array.isArray(data) ? data : data?.data || []);
+      if (data?.pagination) setPagination({ page: data.pagination.page, totalPages: data.pagination.totalPages, total: data.pagination.total });
     } catch (err) { toast.error('Failed to load fraud rules'); }
     finally { setLoading(false); }
-  };
+  }, []);
+
+  useEffect(() => { loadItems(1); }, [loadItems]);
 
   const openDetail = (item) => { setSelected(item); setShowDetail(true); };
 
@@ -55,7 +61,7 @@ export default function FraudRules() {
     try {
       await api.delete(`/fraud-rules/${item._id || item.id}`);
       toast.success('Rule deleted');
-      loadItems();
+      loadItems(pagination.page);
     } catch (err) { toast.error('Failed to delete'); }
   };
 
@@ -75,7 +81,7 @@ export default function FraudRules() {
         toast.success('Rule created');
       }
       setShowForm(false);
-      loadItems();
+      loadItems(pagination.page);
     } catch (err) { toast.error(err.response?.data?.error || 'Save failed'); }
   };
 
@@ -83,11 +89,48 @@ export default function FraudRules() {
     e.stopPropagation();
     try {
       await api.put(`/fraud-rules/${item._id || item.id}`, { isActive: !item.isActive });
-      loadItems();
+      loadItems(pagination.page);
     } catch (err) { toast.error('Toggle failed'); }
   };
 
   const setField = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  const [aiSuggestions, setAiSuggestions] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [showAiModal, setShowAiModal] = useState(false);
+
+  const getAiSuggestions = async () => {
+    setAiLoading(true);
+    try {
+      const res = await api.post('/ai/suggest-rules', {});
+      setAiSuggestions(res.data);
+      setShowAiModal(true);
+      toast.success(`AI generated ${res.data?.suggestedRules?.length || 0} rule suggestions`);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to get AI suggestions');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const acceptSuggestion = async (rule) => {
+    const payload = {
+      name: rule.name,
+      description: rule.description,
+      ruleType: 'custom',
+      conditionJson: rule.conditionJson || rule.condition_json || {},
+      severity: 'medium',
+      action: 'flag',
+      isActive: false,
+    };
+    try {
+      await api.post('/fraud-rules', payload);
+      toast.success(`Rule "${rule.name}" added successfully`);
+      loadItems(1);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to add rule');
+    }
+  };
 
   if (loading) return <div className="loading-container"><div className="spinner"></div> Loading...</div>;
 
@@ -95,7 +138,12 @@ export default function FraudRules() {
     <div>
       <div className="page-header">
         <div><h2>Fraud Rules</h2><p>Configure and manage fraud detection rules</p></div>
-        <button className="btn btn-primary" onClick={openNew}><FiPlus /> New Rule</button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button className="btn btn-secondary" onClick={getAiSuggestions} disabled={aiLoading}>
+            <FiCpu /> {aiLoading ? 'Analyzing...' : 'Get AI Suggestions'}
+          </button>
+          <button className="btn btn-primary" onClick={openNew}><FiPlus /> New Rule</button>
+        </div>
       </div>
 
       <div className="table-container">
@@ -128,6 +176,13 @@ export default function FraudRules() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          totalItems={pagination.total}
+          limit={LIMIT}
+          onPageChange={(p) => loadItems(p)}
+        />
       </div>
 
       {showDetail && selected && (
@@ -151,6 +206,49 @@ export default function FraudRules() {
                 <div className="detail-item"><span className="detail-label">Created</span><span className="detail-value">{selected.createdAt ? new Date(selected.createdAt).toLocaleString() : '-'}</span></div>
                 <div className="detail-item"><span className="detail-label">Updated</span><span className="detail-value">{selected.updatedAt ? new Date(selected.updatedAt).toLocaleString() : '-'}</span></div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAiModal && aiSuggestions && (
+        <div className="modal-overlay" onClick={() => setShowAiModal(false)}>
+          <div className="modal" style={{ maxWidth: '700px', maxHeight: '80vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>AI Rule Suggestions</h3>
+              <button className="modal-close" onClick={() => setShowAiModal(false)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ color: '#6b7280', marginBottom: '16px' }}>
+                Analyzed {aiSuggestions.analyzedAlerts || 0} recent alerts. {aiSuggestions.suggestedRules?.length || 0} rules suggested.
+              </p>
+              {(aiSuggestions.suggestedRules || []).map((rule, idx) => (
+                <div key={idx} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px', marginBottom: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1 }}>
+                      <h4 style={{ margin: '0 0 4px 0', fontSize: '15px' }}>{rule.name}</h4>
+                      <p style={{ margin: '0 0 8px 0', color: '#6b7280', fontSize: '13px' }}>{rule.description}</p>
+                      <div style={{ display: 'flex', gap: '12px', fontSize: '12px' }}>
+                        <span>Priority: <strong>{rule.priority || '-'}</strong></span>
+                        <span>Expected Precision: <strong>{rule.expectedPrecision ? `${(rule.expectedPrecision * 100).toFixed(0)}%` : '-'}</strong></span>
+                      </div>
+                      {rule.conditionJson && (
+                        <pre style={{ background: '#f3f4f6', padding: '8px', borderRadius: '4px', fontSize: '11px', marginTop: '8px', overflow: 'auto' }}>
+                          {JSON.stringify(rule.conditionJson || rule.condition_json, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', marginLeft: '16px', flexShrink: 0 }}>
+                      <button className="btn btn-primary btn-sm" onClick={() => acceptSuggestion(rule)} title="Add Rule">
+                        <FiCheckCircle />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowAiModal(false)}>Close</button>
             </div>
           </div>
         </div>

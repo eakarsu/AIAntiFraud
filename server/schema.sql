@@ -1,9 +1,15 @@
--- Anti-Fraud & Credit Analysis Engine - Database Schema
+-- Anti-Fraud & Credit Analysis Engine - Database Schema v2
 -- Run with: psql $DATABASE_URL -f server/schema.sql
 
 BEGIN;
 
 -- Drop existing tables in reverse dependency order
+DROP TABLE IF EXISTS case_notes CASCADE;
+DROP TABLE IF EXISTS chargebacks CASCADE;
+DROP TABLE IF EXISTS cases CASCADE;
+DROP TABLE IF EXISTS ai_results CASCADE;
+DROP TABLE IF EXISTS transaction_risk_scores CASCADE;
+DROP TABLE IF EXISTS rule_suggestions CASCADE;
 DROP TABLE IF EXISTS audit_log CASCADE;
 DROP TABLE IF EXISTS behavioral_patterns CASCADE;
 DROP TABLE IF EXISTS merchant_risk_profiles CASCADE;
@@ -24,6 +30,8 @@ DROP TYPE IF EXISTS rule_severity CASCADE;
 DROP TYPE IF EXISTS risk_level_enum CASCADE;
 DROP TYPE IF EXISTS model_status CASCADE;
 DROP TYPE IF EXISTS entity_type_enum CASCADE;
+DROP TYPE IF EXISTS case_status CASCADE;
+DROP TYPE IF EXISTS chargeback_status CASCADE;
 
 -- Create custom ENUM types
 CREATE TYPE transaction_status AS ENUM ('approved', 'blocked', 'flagged', 'pending');
@@ -34,15 +42,18 @@ CREATE TYPE rule_severity AS ENUM ('low', 'medium', 'high', 'critical');
 CREATE TYPE risk_level_enum AS ENUM ('very_low', 'low', 'medium', 'high', 'very_high');
 CREATE TYPE model_status AS ENUM ('training', 'active', 'inactive', 'archived');
 CREATE TYPE entity_type_enum AS ENUM ('individual', 'organization');
+CREATE TYPE case_status AS ENUM ('open', 'investigating', 'submitted', 'resolved', 'closed');
+CREATE TYPE chargeback_status AS ENUM ('filed', 'evidence_period', 'pending_decision', 'won', 'lost', 'withdrawn');
 
 -- users table
 CREATE TABLE users (
-  id          SERIAL PRIMARY KEY,
-  email       VARCHAR(255) UNIQUE NOT NULL,
+  id            SERIAL PRIMARY KEY,
+  email         VARCHAR(255) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
-  name        VARCHAR(255) NOT NULL,
-  role        VARCHAR(50) NOT NULL DEFAULT 'analyst' CHECK (role IN ('admin', 'analyst', 'reviewer')),
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  name          VARCHAR(255) NOT NULL,
+  role          VARCHAR(50) NOT NULL DEFAULT 'analyst' CHECK (role IN ('admin', 'analyst', 'reviewer')),
+  is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX idx_users_email ON users(email);
@@ -64,6 +75,7 @@ CREATE TABLE transactions (
   status                transaction_status NOT NULL DEFAULT 'pending',
   risk_score            DECIMAL(5, 2) CHECK (risk_score >= 0 AND risk_score <= 100),
   fraud_confirmed       BOOLEAN NOT NULL DEFAULT FALSE,
+  rule_triggered_id     INTEGER,
   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -72,6 +84,8 @@ CREATE INDEX idx_transactions_status ON transactions(status);
 CREATE INDEX idx_transactions_created_at ON transactions(created_at DESC);
 CREATE INDEX idx_transactions_risk_score ON transactions(risk_score DESC);
 CREATE INDEX idx_transactions_fraud_confirmed ON transactions(fraud_confirmed);
+CREATE INDEX idx_transactions_merchant_name ON transactions(merchant_name);
+CREATE INDEX idx_transactions_device_id ON transactions(device_id);
 
 -- fraud_rules table
 CREATE TABLE fraud_rules (
@@ -83,6 +97,7 @@ CREATE TABLE fraud_rules (
   action          rule_action NOT NULL DEFAULT 'flag',
   severity        rule_severity NOT NULL DEFAULT 'medium',
   is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+  hit_count       INTEGER NOT NULL DEFAULT 0,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -126,7 +141,7 @@ CREATE TABLE credit_scores (
   loan_amount_requested     DECIMAL(15, 2),
   loan_purpose              VARCHAR(255),
   ai_recommendation         TEXT,
-  ai_risk_analysis          TEXT,
+  ai_risk_analysis          JSONB,
   created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -222,7 +237,108 @@ CREATE INDEX idx_merchant_risk_merchant_name ON merchant_risk_profiles(merchant_
 CREATE INDEX idx_merchant_risk_is_flagged ON merchant_risk_profiles(is_flagged);
 CREATE INDEX idx_merchant_risk_risk_score ON merchant_risk_profiles(risk_score DESC);
 
--- Trigger function: auto-update credit_scores.updated_at
+-- ai_results table — persists every AI call
+CREATE TABLE ai_results (
+  id            SERIAL PRIMARY KEY,
+  endpoint      VARCHAR(100) NOT NULL,
+  entity_type   VARCHAR(100),
+  entity_id     INTEGER,
+  input_data    JSONB,
+  result        JSONB NOT NULL,
+  model_used    VARCHAR(255),
+  user_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_ai_results_endpoint ON ai_results(endpoint);
+CREATE INDEX idx_ai_results_entity ON ai_results(entity_type, entity_id);
+CREATE INDEX idx_ai_results_created_at ON ai_results(created_at DESC);
+
+-- transaction_risk_scores table
+CREATE TABLE transaction_risk_scores (
+  id                  SERIAL PRIMARY KEY,
+  transaction_id      INTEGER REFERENCES transactions(id) ON DELETE SET NULL,
+  user_id             INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  risk_score          INTEGER NOT NULL,
+  risk_factors        JSONB NOT NULL DEFAULT '[]',
+  auto_alert_created  BOOLEAN NOT NULL DEFAULT FALSE,
+  model_used          VARCHAR(255),
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_trs_transaction_id ON transaction_risk_scores(transaction_id);
+CREATE INDEX idx_trs_created_at ON transaction_risk_scores(created_at DESC);
+
+-- rule_suggestions table — AI-suggested fraud rules
+CREATE TABLE rule_suggestions (
+  id              SERIAL PRIMARY KEY,
+  suggested_by_ai VARCHAR(255) NOT NULL DEFAULT 'anthropic/claude-3-5-sonnet-20241022',
+  rule_data       JSONB NOT NULL,
+  status          VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected')),
+  reviewed_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_at     TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_rule_suggestions_status ON rule_suggestions(status);
+
+-- cases table — fraud investigation case management
+CREATE TABLE cases (
+  id              SERIAL PRIMARY KEY,
+  title           VARCHAR(500) NOT NULL,
+  description     TEXT,
+  status          case_status NOT NULL DEFAULT 'open',
+  priority        rule_severity NOT NULL DEFAULT 'medium',
+  assigned_to     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  alert_id        INTEGER REFERENCES fraud_alerts(id) ON DELETE SET NULL,
+  transaction_id  INTEGER REFERENCES transactions(id) ON DELETE SET NULL,
+  resolved_at     TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_cases_status ON cases(status);
+CREATE INDEX idx_cases_assigned_to ON cases(assigned_to);
+CREATE INDEX idx_cases_created_at ON cases(created_at DESC);
+
+-- case_notes table
+CREATE TABLE case_notes (
+  id          SERIAL PRIMARY KEY,
+  case_id     INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+  user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  note        TEXT NOT NULL,
+  note_type   VARCHAR(50) NOT NULL DEFAULT 'comment' CHECK (note_type IN ('comment', 'evidence', 'decision', 'status_change')),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_case_notes_case_id ON case_notes(case_id);
+
+-- chargebacks table
+CREATE TABLE chargebacks (
+  id              SERIAL PRIMARY KEY,
+  transaction_id  INTEGER REFERENCES transactions(id) ON DELETE SET NULL,
+  alert_id        INTEGER REFERENCES fraud_alerts(id) ON DELETE SET NULL,
+  customer_name   VARCHAR(255) NOT NULL,
+  amount          DECIMAL(15, 2) NOT NULL,
+  reason_code     VARCHAR(100),
+  reason_text     TEXT,
+  status          chargeback_status NOT NULL DEFAULT 'filed',
+  filed_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  evidence_due    TIMESTAMPTZ,
+  decision_at     TIMESTAMPTZ,
+  ai_recommendation TEXT,
+  ai_outcome_prediction JSONB,
+  assigned_to     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_chargebacks_status ON chargebacks(status);
+CREATE INDEX idx_chargebacks_transaction_id ON chargebacks(transaction_id);
+CREATE INDEX idx_chargebacks_created_at ON chargebacks(created_at DESC);
+
+-- Trigger: auto-update credit_scores.updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -235,7 +351,15 @@ CREATE TRIGGER trigger_credit_scores_updated_at
   BEFORE UPDATE ON credit_scores
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- Trigger function: auto-update behavioral_patterns.last_updated
+CREATE TRIGGER trigger_cases_updated_at
+  BEFORE UPDATE ON cases
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER trigger_chargebacks_updated_at
+  BEFORE UPDATE ON chargebacks
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Trigger: auto-update behavioral_patterns.last_updated
 CREATE OR REPLACE FUNCTION update_last_updated_column()
 RETURNS TRIGGER AS $$
 BEGIN

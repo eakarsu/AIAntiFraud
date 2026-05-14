@@ -1,7 +1,7 @@
 const express = require('express');
-const axios = require('axios');
 const { query } = require('../db');
 const { authenticateToken } = require('../middleware/auth');
+const { callOpenRouter, persistAIResult, DEFAULT_MODEL } = require('../aiHelper');
 
 const router = express.Router();
 
@@ -239,55 +239,37 @@ router.post('/:id/analyze', authenticateToken, async (req, res) => {
 
     const cs = csResult.rows[0];
 
-    const systemPrompt = `You are an expert credit analyst AI. Analyze the given credit profile and provide:
-1. A loan recommendation (APPROVE, CONDITIONAL, or DECLINE)
-2. Risk assessment with detailed reasoning
-3. Key risk factors identified
-4. Suggested loan terms if approved (interest rate range, max amount)
-5. Improvement suggestions for the applicant
-Respond in JSON format with fields: recommendation, risk_assessment, risk_factors (array), suggested_terms (object with rate_range, max_amount, term_months), improvement_suggestions (array).`;
+    const systemPrompt = `You are an expert credit risk analyst AI. Assess the credit application and provide a detailed recommendation.
+Respond ONLY with valid JSON:
+{
+  "recommendation": "APPROVE|CONDITIONAL|DECLINE",
+  "risk_grade": "A|B|C|D|F",
+  "default_probability": 0.0-1.0,
+  "risk_factors": [{"factor": "string", "impact": "high|medium|low", "description": "string"}],
+  "strengths": ["string array"],
+  "weaknesses": ["string array"],
+  "suggested_terms": {"max_amount": 0, "interest_rate_range": "string", "term_months": 0, "conditions": ["string"]},
+  "improvement_plan": ["actionable suggestion strings"],
+  "comparable_profile_default_rate": "percentage string",
+  "confidence": 0-100
+}`;
 
-    const userPrompt = `Analyze this credit application:
+    const userPrompt = `Assess this credit application:
 Customer: ${cs.customer_name}
 Credit Score: ${cs.credit_score}
 Risk Level: ${cs.risk_level}
 Annual Income: $${cs.income}
-Debt-to-Income Ratio: ${cs.debt_to_income}%
+Debt-to-Income: ${cs.debt_to_income}%
 Payment History Score: ${cs.payment_history_score}
 Credit Utilization: ${cs.credit_utilization}%
 Account Age: ${cs.account_age_months} months
-Number of Accounts: ${cs.num_accounts}
+Accounts: ${cs.num_accounts}
 Late Payments: ${cs.num_late_payments}
-Loan Amount Requested: $${cs.loan_amount_requested}
-Loan Purpose: ${cs.loan_purpose}`;
+Loan Requested: $${cs.loan_amount_requested}
+Purpose: ${cs.loan_purpose}`;
 
-    const aiResponse = await axios.post(
-      'https://openrouter.ai/api/v1/chat/completions',
-      {
-        model: process.env.OPENROUTER_MODEL,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 30000,
-      }
-    );
-
-    let analysisText = aiResponse.data.choices[0].message.content;
-    const jsonMatch = analysisText.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-    if (jsonMatch) analysisText = jsonMatch[1].trim();
-    let analysis;
-    try {
-      analysis = JSON.parse(analysisText);
-    } catch {
-      analysis = { raw_response: analysisText };
-    }
+    const model = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
+    const analysis = await callOpenRouter(systemPrompt, userPrompt, model);
 
     await query(
       `UPDATE credit_scores SET
@@ -295,17 +277,29 @@ Loan Purpose: ${cs.loan_purpose}`;
          ai_risk_analysis = $2
        WHERE id = $3`,
       [
-        analysis.recommendation || analysisText,
+        analysis.recommendation || 'See analysis',
         JSON.stringify(analysis),
         cs.id,
       ]
     );
 
+    const aiResultId = await persistAIResult({
+      endpoint: 'credit-scores-analyze',
+      entityType: 'credit_score',
+      entityId: cs.id,
+      inputData: { credit_data: cs },
+      result: analysis,
+      modelUsed: model,
+      userId: req.user?.id,
+    });
+
     return res.json({
       credit_score_id: cs.id,
       customer_name: cs.customer_name,
       analysis,
-      model_used: process.env.OPENROUTER_MODEL,
+      ai_result_id: aiResultId,
+      model_used: model,
+      analyzed_at: new Date().toISOString(),
     });
   } catch (err) {
     if (err.response) {

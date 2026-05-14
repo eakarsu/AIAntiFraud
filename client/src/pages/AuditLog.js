@@ -1,22 +1,29 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { toast } from 'react-toastify';
 import api from '../api';
+import Pagination from '../components/Pagination';
+
+const LIMIT = 50;
 
 export default function AuditLog() {
   const [items, setItems] = useState([]);
+  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
 
-  useEffect(() => { loadItems(); }, []);
-
-  const loadItems = async () => {
+  const loadItems = useCallback(async (page = 1) => {
+    setLoading(true);
     try {
-      const res = await api.get('/audit-log');
-      setItems(Array.isArray(res.data) ? res.data : res.data?.data || []);
+      const res = await api.get('/audit-log', { params: { page, limit: LIMIT } });
+      const data = res.data;
+      setItems(data.data || []);
+      if (data.pagination) setPagination({ page: data.pagination.page, totalPages: data.pagination.totalPages, total: data.pagination.total });
     } catch (err) { toast.error('Failed to load audit log'); }
     finally { setLoading(false); }
-  };
+  }, []);
+
+  useEffect(() => { loadItems(1); }, [loadItems]);
 
   const openDetail = (item) => { setSelected(item); setShowDetail(true); };
 
@@ -50,7 +57,7 @@ export default function AuditLog() {
               {items.length === 0 ? (
                 <tr><td colSpan="6" style={{ textAlign: 'center', padding: '40px' }}>No audit log entries</td></tr>
               ) : items.map(l => (
-                <tr key={l._id || l.id} onClick={() => openDetail(l)}>
+                <tr key={l.id} onClick={() => openDetail(l)}>
                   <td><span className={`badge badge-${l.action === 'delete' ? 'red' : l.action === 'create' ? 'green' : l.action === 'update' ? 'blue' : 'gray'}`}>{l.action || '-'}</span></td>
                   <td>{l.entityType || l.entity || '-'}</td>
                   <td>{(l.entityId || l.targetId || '-').toString().slice(-8)}</td>
@@ -62,6 +69,13 @@ export default function AuditLog() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          totalItems={pagination.total}
+          limit={LIMIT}
+          onPageChange={(p) => loadItems(p)}
+        />
       </div>
 
       {showDetail && selected && (

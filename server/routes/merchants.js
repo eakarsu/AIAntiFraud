@@ -1,7 +1,7 @@
 const express = require('express');
-const axios = require('axios');
 const { query } = require('../db');
 const { authenticateToken, requireRole } = require('../middleware/auth');
+const { callOpenRouter, persistAIResult, DEFAULT_MODEL } = require('../aiHelper');
 
 const router = express.Router();
 
@@ -233,7 +233,7 @@ router.delete('/:id', authenticateToken, requireRole('admin'), async (req, res) 
   }
 });
 
-// POST /api/merchants/:id/analyze
+// POST /api/merchant-profiles/:id/analyze
 router.post('/:id/analyze', authenticateToken, async (req, res) => {
   try {
     const mrResult = await query('SELECT * FROM merchant_risk_profiles WHERE id = $1', [req.params.id]);
@@ -243,68 +243,62 @@ router.post('/:id/analyze', authenticateToken, async (req, res) => {
     }
 
     const mr = mrResult.rows[0];
+    const chargebackRatePct = mr.chargeback_rate != null
+      ? (parseFloat(mr.chargeback_rate) * 100).toFixed(2) + '%'
+      : 'N/A';
 
-    const systemPrompt = `You are an expert merchant risk analyst AI. Analyze the given merchant risk profile and provide:
-1. Overall risk assessment (low_risk, moderate_risk, high_risk, critical_risk)
-2. Key risk factors identified
-3. Chargeback analysis and trends
-4. Fraud pattern indicators
-5. Recommended actions (continue_monitoring, enhanced_monitoring, restrict, terminate)
-6. Industry comparison
-Respond in JSON format with fields: risk_assessment, risk_factors (array), chargeback_analysis, fraud_indicators (array), recommended_action, industry_comparison, risk_score_adjustment (number), detailed_reasoning.`;
+    const systemPrompt = `You are an expert merchant risk analyst AI. Analyze the merchant risk profile and provide a compliance assessment.
+Respond ONLY with valid JSON:
+{
+  "screening_result": "clear|watchlist_match|suspicious|high_risk|blocked",
+  "compliance_score": 0-100,
+  "risk_factors": [{"factor": "string", "severity": "high|medium|low", "description": "string"}],
+  "fraud_indicators": ["string array"],
+  "recommended_action": "continue_monitoring|enhanced_monitoring|restrict|terminate",
+  "due_diligence_checklist": [{"item": "string", "status": "pass|fail|unknown", "notes": "string"}],
+  "country_risk_assessment": {"country": "string", "risk_level": "low|medium|high", "sanctions_status": "clear|flagged"},
+  "risk_score_adjustment": 0-100,
+  "summary": "concise assessment string",
+  "confidence": 0-100
+}`;
 
     const userPrompt = `Analyze this merchant risk profile:
 Merchant Name: ${mr.merchant_name}
 Category: ${mr.merchant_category || 'Unknown'}
 Current Risk Score: ${mr.risk_score}
-Chargeback Rate: ${(mr.chargeback_rate * 100).toFixed(2)}%
+Chargeback Rate: ${chargebackRatePct}
 Fraud Incidents: ${mr.fraud_incident_count}
-Average Transaction Amount: $${mr.avg_transaction_amount}
-Country: ${mr.country}
+Average Transaction Amount: $${mr.avg_transaction_amount || 0}
+Country: ${mr.country || 'Unknown'}
 Currently Flagged: ${mr.is_flagged}
 Profile Created: ${mr.created_at}`;
 
-    const aiResponse = await axios.post(
-      'https://openrouter.ai/api/v1/chat/completions',
-      {
-        model: process.env.OPENROUTER_MODEL,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 30000,
-      }
-    );
+    const model = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
+    const analysis = await callOpenRouter(systemPrompt, userPrompt, model);
 
-    let analysisText = aiResponse.data.choices[0].message.content;
-    const jsonMatch = analysisText.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-    if (jsonMatch) analysisText = jsonMatch[1].trim();
-    let analysis;
-    try {
-      analysis = JSON.parse(analysisText);
-    } catch {
-      analysis = { raw_response: analysisText };
+    if (analysis.risk_score_adjustment != null) {
+      const newScore = Math.min(100, Math.max(0, parseFloat(analysis.risk_score_adjustment)));
+      await query('UPDATE merchant_risk_profiles SET risk_score = $1 WHERE id = $2', [newScore, mr.id]);
     }
 
-    if (analysis.risk_score_adjustment !== undefined) {
-      const newScore = Math.min(100, Math.max(0, analysis.risk_score_adjustment));
-      await query(
-        'UPDATE merchant_risk_profiles SET risk_score = $1 WHERE id = $2',
-        [newScore, mr.id]
-      );
-    }
+    const aiResultId = await persistAIResult({
+      endpoint: 'merchant-analyze',
+      entityType: 'merchant',
+      entityId: mr.id,
+      inputData: { merchant: mr },
+      result: analysis,
+      modelUsed: model,
+      userId: req.user?.id,
+    });
 
     return res.json({
       merchant_id: mr.id,
       merchant_name: mr.merchant_name,
+      merchant: mr,
       analysis,
-      model_used: process.env.OPENROUTER_MODEL,
+      ai_result_id: aiResultId,
+      model_used: model,
+      analyzed_at: new Date().toISOString(),
     });
   } catch (err) {
     if (err.response) {

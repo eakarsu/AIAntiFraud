@@ -3,7 +3,8 @@ import { Routes, Route, NavLink, Navigate, useNavigate, useLocation } from 'reac
 import {
   FiShield, FiAlertTriangle, FiCreditCard, FiActivity,
   FiUsers, FiSearch, FiSettings, FiBarChart2, FiList,
-  FiEye, FiLogOut
+  FiEye, FiLogOut, FiCpu, FiGitMerge, FiThumbsUp,
+  FiBriefcase, FiRotateCcw, FiUserCheck
 } from 'react-icons/fi';
 
 import Login from './pages/Login';
@@ -17,6 +18,13 @@ import Watchlist from './pages/Watchlist';
 import AuditLog from './pages/AuditLog';
 import BehavioralPatterns from './pages/BehavioralPatterns';
 import MerchantProfiles from './pages/MerchantProfiles';
+import AlertDetail from './pages/AlertDetail';
+import AIResults from './pages/AIResults';
+import AITools from './pages/AITools';
+import RuleSuggestions from './pages/RuleSuggestions';
+import Cases from './pages/Cases';
+import Chargebacks from './pages/Chargebacks';
+import Users from './pages/Users';
 
 const AuthContext = createContext(null);
 
@@ -69,6 +77,12 @@ const navItems = [
   { path: '/audit-log', label: 'Audit Log', icon: FiList },
   { path: '/behavioral-patterns', label: 'Behavioral Patterns', icon: FiEye },
   { path: '/merchant-profiles', label: 'Merchant Profiles', icon: FiUsers },
+  { path: '/ai-tools', label: 'AI Tools', icon: FiCpu },
+  { path: '/ai-results', label: 'AI History', icon: FiCpu },
+  { path: '/rule-suggestions', label: 'AI Rule Suggestions', icon: FiThumbsUp },
+  { path: '/cases', label: 'Cases', icon: FiBriefcase },
+  { path: '/chargebacks', label: 'Chargebacks', icon: FiRotateCcw },
+  { path: '/users', label: 'Users', icon: FiUserCheck },
 ];
 
 function AppLayout() {
@@ -121,12 +135,19 @@ function AppLayout() {
           <Route path="/transactions" element={<Transactions />} />
           <Route path="/fraud-rules" element={<FraudRules />} />
           <Route path="/fraud-alerts" element={<FraudAlerts />} />
+          <Route path="/fraud-alerts/:id" element={<AlertDetail />} />
           <Route path="/credit-scores" element={<CreditScores />} />
           <Route path="/risk-models" element={<RiskModels />} />
           <Route path="/watchlist" element={<Watchlist />} />
           <Route path="/audit-log" element={<AuditLog />} />
           <Route path="/behavioral-patterns" element={<BehavioralPatterns />} />
           <Route path="/merchant-profiles" element={<MerchantProfiles />} />
+          <Route path="/ai-tools" element={<AITools />} />
+          <Route path="/ai-results" element={<AIResults />} />
+          <Route path="/rule-suggestions" element={<RuleSuggestions />} />
+          <Route path="/cases" element={<Cases />} />
+          <Route path="/chargebacks" element={<Chargebacks />} />
+          <Route path="/users" element={<Users />} />
         </Routes>
       </main>
     </div>

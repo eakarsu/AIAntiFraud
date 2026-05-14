@@ -1,7 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { FiPlus, FiEdit2, FiTrash2 } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import api from '../api';
+import Pagination from '../components/Pagination';
+
+const LIMIT = 20;
 
 const emptyForm = {
   entityName: '', entityType: 'individual', identifier: '',
@@ -11,6 +14,7 @@ const emptyForm = {
 
 export default function Watchlist() {
   const [items, setItems] = useState([]);
+  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
@@ -18,15 +22,18 @@ export default function Watchlist() {
   const [editItem, setEditItem] = useState(null);
   const [form, setForm] = useState({ ...emptyForm });
 
-  useEffect(() => { loadItems(); }, []);
-
-  const loadItems = async () => {
+  const loadItems = useCallback(async (page = 1) => {
+    setLoading(true);
     try {
-      const res = await api.get('/watchlist');
-      setItems(Array.isArray(res.data) ? res.data : res.data?.data || []);
+      const res = await api.get('/watchlist', { params: { page, limit: LIMIT } });
+      const data = res.data;
+      setItems(data.data || []);
+      if (data.pagination) setPagination({ page: data.pagination.page, totalPages: data.pagination.totalPages, total: data.pagination.total });
     } catch (err) { toast.error('Failed to load watchlist'); }
     finally { setLoading(false); }
-  };
+  }, []);
+
+  useEffect(() => { loadItems(1); }, [loadItems]);
 
   const openDetail = (item) => { setSelected(item); setShowDetail(true); };
   const openNew = () => { setEditItem(null); setForm({ ...emptyForm }); setShowForm(true); };
@@ -53,9 +60,9 @@ export default function Watchlist() {
     e.stopPropagation();
     if (!window.confirm(`Remove "${item.entityName}" from watchlist?`)) return;
     try {
-      await api.delete(`/watchlist/${item._id || item.id}`);
+      await api.delete(`/watchlist/${item.id}`);
       toast.success('Entry removed');
-      loadItems();
+      loadItems(pagination.page);
     } catch (err) { toast.error('Failed to delete'); }
   };
 
@@ -63,15 +70,15 @@ export default function Watchlist() {
     e.preventDefault();
     try {
       if (editItem) {
-        await api.put(`/watchlist/${editItem._id || editItem.id}`, form);
+        await api.put(`/watchlist/${editItem.id}`, form);
         toast.success('Entry updated');
       } else {
         await api.post('/watchlist', form);
         toast.success('Entry added');
       }
       setShowForm(false);
-      loadItems();
-    } catch (err) { toast.error(err.response?.data?.error || 'Save failed'); }
+      loadItems(pagination.page);
+    } catch (err) { toast.error(err.response?.data?.message || 'Save failed'); }
   };
 
   const setField = (k, v) => setForm(p => ({ ...p, [k]: v }));
@@ -95,7 +102,7 @@ export default function Watchlist() {
               {items.length === 0 ? (
                 <tr><td colSpan="7" style={{ textAlign: 'center', padding: '40px' }}>No watchlist entries</td></tr>
               ) : items.map(w => (
-                <tr key={w._id || w.id} onClick={() => openDetail(w)}>
+                <tr key={w.id} onClick={() => openDetail(w)}>
                   <td>{w.entityName || '-'}</td>
                   <td><span className={`badge badge-${w.entityType === 'organization' ? 'purple' : 'blue'}`}>{w.entityType || '-'}</span></td>
                   <td>{w.identifier || '-'}</td>
@@ -111,6 +118,13 @@ export default function Watchlist() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          totalItems={pagination.total}
+          limit={LIMIT}
+          onPageChange={(p) => loadItems(p)}
+        />
       </div>
 
       {showDetail && selected && (
