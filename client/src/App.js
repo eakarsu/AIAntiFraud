@@ -24,7 +24,11 @@ import AITools from './pages/AITools';
 import RuleSuggestions from './pages/RuleSuggestions';
 import Cases from './pages/Cases';
 import Chargebacks from './pages/Chargebacks';
+import RefundAbuseRisk from './pages/RefundAbuseRisk';
 import Users from './pages/Users';
+
+import CodexCustomVizFeature from './pages/CodexCustomVizFeature';
+import CodexOperationsFeature from './pages/CodexOperationsFeature';
 
 const AuthContext = createContext(null);
 
@@ -82,6 +86,7 @@ const navItems = [
   { path: '/rule-suggestions', label: 'AI Rule Suggestions', icon: FiThumbsUp },
   { path: '/cases', label: 'Cases', icon: FiBriefcase },
   { path: '/chargebacks', label: 'Chargebacks', icon: FiRotateCcw },
+  { path: '/refund-abuse-risk', label: 'Refund Abuse Risk', icon: FiRotateCcw },
   { path: '/users', label: 'Users', icon: FiUserCheck },
 ];
 
@@ -131,6 +136,9 @@ function AppLayout() {
       </aside>
       <main className="main-content">
         <Routes>
+        <Route path="/codex/custom-viz" element={<ProtectedRoute><CodexCustomVizFeature /></ProtectedRoute>} />
+        <Route path="/codex/operations" element={<ProtectedRoute><CodexOperationsFeature /></ProtectedRoute>} />
+
           <Route path="/" element={<Dashboard />} />
           <Route path="/transactions" element={<Transactions />} />
           <Route path="/fraud-rules" element={<FraudRules />} />
@@ -147,6 +155,7 @@ function AppLayout() {
           <Route path="/rule-suggestions" element={<RuleSuggestions />} />
           <Route path="/cases" element={<Cases />} />
           <Route path="/chargebacks" element={<Chargebacks />} />
+          <Route path="/refund-abuse-risk" element={<RefundAbuseRisk />} />
           <Route path="/users" element={<Users />} />
         </Routes>
       </main>

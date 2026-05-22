@@ -115,6 +115,7 @@ app.use('/api/users', usersRoutes);
 app.use('/api/rule-suggestions', ruleSuggestionsRoutes);
 app.use('/api/cases', casesRoutes);
 app.use('/api/chargebacks', chargebacksRoutes);
+app.use('/api/refund-abuse-risk', require('./routes/refundAbuseRisk'));
 
 // 404 handler
 app.use((req, res) => {
