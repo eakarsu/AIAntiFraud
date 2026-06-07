@@ -26,6 +26,7 @@ import Cases from './pages/Cases';
 import Chargebacks from './pages/Chargebacks';
 import RefundAbuseRisk from './pages/RefundAbuseRisk';
 import Users from './pages/Users';
+import ProductionControls from './pages/ProductionControls';
 
 import CodexCustomVizFeature from './pages/CodexCustomVizFeature';
 import CodexOperationsFeature from './pages/CodexOperationsFeature';
@@ -87,6 +88,7 @@ const navItems = [
   { path: '/cases', label: 'Cases', icon: FiBriefcase },
   { path: '/chargebacks', label: 'Chargebacks', icon: FiRotateCcw },
   { path: '/refund-abuse-risk', label: 'Refund Abuse Risk', icon: FiRotateCcw },
+  { path: '/production-controls', label: 'Production Controls', icon: FiSettings },
   { path: '/users', label: 'Users', icon: FiUserCheck },
 ];
 
@@ -156,6 +158,7 @@ function AppLayout() {
           <Route path="/cases" element={<Cases />} />
           <Route path="/chargebacks" element={<Chargebacks />} />
           <Route path="/refund-abuse-risk" element={<RefundAbuseRisk />} />
+          <Route path="/production-controls" element={<ProductionControls />} />
           <Route path="/users" element={<Users />} />
         </Routes>
       </main>
