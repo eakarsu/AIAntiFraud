@@ -52,6 +52,7 @@ CREATE TABLE users (
   password_hash VARCHAR(255) NOT NULL,
   name          VARCHAR(255) NOT NULL,
   role          VARCHAR(50) NOT NULL DEFAULT 'analyst' CHECK (role IN ('admin', 'analyst', 'reviewer')),
+  tenant_id     TEXT NOT NULL DEFAULT 'default',
   is_active     BOOLEAN NOT NULL DEFAULT TRUE,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

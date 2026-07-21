@@ -5,6 +5,7 @@ const { query } = require('../db');
 const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
+const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID || 'default';
 
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
@@ -19,7 +20,7 @@ router.post('/login', async (req, res) => {
     }
 
     const result = await query(
-      'SELECT id, email, password_hash, name, role FROM users WHERE email = $1',
+      'SELECT id, email, password_hash, name, role, tenant_id FROM users WHERE email = $1',
       [email.toLowerCase().trim()]
     );
 
@@ -46,6 +47,7 @@ router.post('/login', async (req, res) => {
         email: user.email,
         name: user.name,
         role: user.role,
+        tenant_id: user.tenant_id,
       },
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
@@ -70,6 +72,7 @@ router.post('/login', async (req, res) => {
         email: user.email,
         name: user.name,
         role: user.role,
+        tenant_id: user.tenant_id,
       },
     });
   } catch (err) {
@@ -83,8 +86,12 @@ router.post('/login', async (req, res) => {
 
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
+  if (process.env.ALLOW_PUBLIC_REGISTRATION !== 'true') {
+    return res.status(403).json({ error: 'Forbidden', message: 'Public registration is disabled; request an organization invitation' });
+  }
   try {
-    const { email, password, name, role = 'analyst' } = req.body;
+    const { email, password, name } = req.body;
+    const role = 'analyst';
 
     if (!email || !password || !name) {
       return res.status(400).json({
@@ -93,10 +100,10 @@ router.post('/register', async (req, res) => {
       });
     }
 
-    if (password.length < 8) {
+    if (password.length < 12) {
       return res.status(400).json({
         error: 'Bad Request',
-        message: 'Password must be at least 8 characters long',
+        message: 'Password must be at least 12 characters long',
       });
     }
 
@@ -124,10 +131,10 @@ router.post('/register', async (req, res) => {
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
     const result = await query(
-      `INSERT INTO users (email, password_hash, name, role)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, email, name, role, created_at`,
-      [email.toLowerCase().trim(), passwordHash, name.trim(), role]
+      `INSERT INTO users (email, password_hash, name, role, tenant_id)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, email, name, role, tenant_id, created_at`,
+      [email.toLowerCase().trim(), passwordHash, name.trim(), role, DEFAULT_TENANT_ID]
     );
 
     const newUser = result.rows[0];
@@ -138,6 +145,7 @@ router.post('/register', async (req, res) => {
         email: newUser.email,
         name: newUser.name,
         role: newUser.role,
+        tenant_id: newUser.tenant_id,
       },
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
@@ -151,6 +159,7 @@ router.post('/register', async (req, res) => {
         email: newUser.email,
         name: newUser.name,
         role: newUser.role,
+        tenant_id: newUser.tenant_id,
         created_at: newUser.created_at,
       },
     });
@@ -167,8 +176,8 @@ router.post('/register', async (req, res) => {
 router.get('/me', authenticateToken, async (req, res) => {
   try {
     const result = await query(
-      'SELECT id, email, name, role, created_at FROM users WHERE id = $1',
-      [req.user.id]
+      'SELECT id, email, name, role, tenant_id, created_at FROM users WHERE id = $1 AND tenant_id = $2',
+      [req.user.id, req.user.tenant_id]
     );
 
     if (result.rows.length === 0) {
@@ -200,10 +209,10 @@ router.post('/change-password', authenticateToken, async (req, res) => {
       });
     }
 
-    if (newPassword.length < 8) {
+    if (newPassword.length < 12) {
       return res.status(400).json({
         error: 'Bad Request',
-        message: 'New password must be at least 8 characters long',
+        message: 'New password must be at least 12 characters long',
       });
     }
 

@@ -7,7 +7,8 @@
     "start": "node server/index.js",
     "dev": "nodemon server/index.js",
     "db:init": "psql $DATABASE_URL -f server/schema.sql",
-    "db:seed": "psql $DATABASE_URL -f server/seed.sql"
+    "db:seed": "node server/scripts/seedDemo.js",
+    "test": "node --test server/tests/*.test.js"
   },
   "dependencies": {
     "axios": "^1.7.2",

@@ -22,6 +22,12 @@ const ruleSuggestionsRoutes = require('./routes/ruleSuggestions');
 const casesRoutes = require('./routes/cases');
 const chargebacksRoutes = require('./routes/chargebacks');
 
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+  throw new Error('JWT_SECRET must contain at least 32 characters');
+}
+if (process.env.NODE_ENV === 'production' && !process.env.CLIENT_URL) throw new Error('CLIENT_URL is required in production');
+if (process.env.NODE_ENV === 'production' && !process.env.DEFAULT_TENANT_ID) throw new Error('DEFAULT_TENANT_ID is required in production');
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -109,13 +115,14 @@ app.use('/api/audit-log', auditLogRoutes);
 app.use('/api/behavioral-patterns', behavioralRoutes);
 app.use('/api/merchant-profiles', merchantRoutes);
 app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/ai', aiRateLimiter, aiRoutes);
+if (process.env.ENABLE_EXPERIMENTAL_AI === 'true') app.use('/api/ai', aiRateLimiter, aiRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/rule-suggestions', ruleSuggestionsRoutes);
 app.use('/api/cases', casesRoutes);
 app.use('/api/chargebacks', chargebacksRoutes);
 app.use('/api/refund-abuse-risk', require('./routes/refundAbuseRisk'));
+app.use('/api/governed-investigations', require('./routes/governedInvestigations'));
 
 // 404 handler
 app.use((req, res) => {
@@ -144,20 +151,3 @@ app.listen(PORT, () => {
 });
 
 module.exports = app;
-
-// BATCH_00_AUDIT_MOUNTS
-app.use('/api/graph-anomaly', require('./routes/graphAnomaly'));
-app.use('/api/behavioral-biometrics', require('./routes/behavioralBiometrics'));
-app.use('/api/ml-rule-auto', require('./routes/mlRuleAuto'));
-app.use('/api/card-network-feed', require('./routes/cardNetworkFeed'));
-app.use('/api/cross-merchant-fraud', require('./routes/crossMerchantFraud'));
-
-// === Batch 00 Gaps & Frontend Mounts ===
-app.use('/api/gap-ai-velocity-rule-learning-rapid', require('./routes/gap_ai_velocity_rule_learning_rapid'));
-app.use('/api/gap-ai-money-mule-cash-out', require('./routes/gap_ai_money_mule_cash_out'));
-app.use('/api/gap-ai-synthetic-identity-detection', require('./routes/gap_ai_synthetic_identity_detection'));
-app.use('/api/gap-ai-explainability-risk-score-outputs', require('./routes/gap_ai_explainability_risk_score_outputs'));
-app.use('/api/gap-payment-network-integration-visa-mastercard', require('./routes/gap_payment_network_integration_visa_mastercard'));
-app.use('/api/gap-biometric-device-fingerprint-verification', require('./routes/gap_biometric_device_fingerprint_verification'));
-app.use('/api/gap-notifications-subsystem', require('./routes/gap_notifications_subsystem'));
-app.use('/api/gap-outbound-webhooks-siem-soc-integration', require('./routes/gap_outbound_webhooks_siem_soc_integration'));

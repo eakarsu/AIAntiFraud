@@ -26,6 +26,9 @@ const authenticateToken = (req, res, next) => {
         message: 'Invalid access token',
       });
     }
+    if (!decoded.tenant_id || typeof decoded.tenant_id !== 'string') {
+      return res.status(403).json({ error: 'Forbidden', message: 'Token is missing organization scope' });
+    }
     req.user = decoded;
     next();
   });
