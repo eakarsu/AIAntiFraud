@@ -33,8 +33,8 @@ export default function Login() {
   };
 
   const quickLogin = () => {
-    setEmail('admin@antifraud.com');
-    setPassword('password123');
+    setEmail(process.env.REACT_APP_DEMO_EMAIL || '');
+    setPassword(process.env.REACT_APP_DEMO_PASSWORD || '');
   };
 
   return (
