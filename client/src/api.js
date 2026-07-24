@@ -20,7 +20,7 @@ function convertKeys(obj, converter) {
 }
 
 const api = axios.create({
-  baseURL: 'http://localhost:3001/api',
+  baseURL: process.env.REACT_APP_API_BASE || '/api',
 });
 
 api.interceptors.request.use(config => {

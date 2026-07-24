@@ -2,7 +2,9 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
+const rateLimitPackage = require('express-rate-limit');
+const rateLimit = rateLimitPackage.rateLimit || rateLimitPackage;
+const { ipKeyGenerator } = rateLimitPackage;
 
 const authRoutes = require('./routes/auth');
 const transactionRoutes = require('./routes/transactions');
@@ -44,12 +46,11 @@ const aiRateLimiter = rateLimit({
   keyGenerator: (req) => {
     const authHeader = req.headers.authorization;
     if (authHeader) return authHeader;
-    const ip = req.ip || req.socket.remoteAddress || 'unknown';
-    return ip.replace(/^::ffff:/, '');
+    return ipKeyGenerator(req.ip || req.socket.remoteAddress || 'unknown');
   },
   standardHeaders: true,
   legacyHeaders: false,
-  validate: { xForwardedForHeader: false, ipKeyGenerator: false },
+  validate: { xForwardedForHeader: false },
   message: { error: 'Too Many Requests', message: 'AI rate limit exceeded. Maximum 20 AI requests per hour.' },
 });
 
@@ -59,12 +60,11 @@ const generalLimiter = rateLimit({
   keyGenerator: (req) => {
     const authHeader = req.headers.authorization;
     if (authHeader) return authHeader;
-    const ip = req.ip || req.socket.remoteAddress || 'unknown';
-    return ip.replace(/^::ffff:/, '');
+    return ipKeyGenerator(req.ip || req.socket.remoteAddress || 'unknown');
   },
   standardHeaders: true,
   legacyHeaders: false,
-  validate: { xForwardedForHeader: false, ipKeyGenerator: false },
+  validate: { xForwardedForHeader: false },
   message: { error: 'Too Many Requests', message: 'Rate limit exceeded. Maximum 100 requests per 15 minutes.' },
 });
 
@@ -105,6 +105,7 @@ app.use('/api/', generalLimiter);
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/runtime-ai', require('./routes/runtimeAi'));
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/fraud-rules', fraudRuleRoutes);
 app.use('/api/fraud-alerts', fraudAlertRoutes);
