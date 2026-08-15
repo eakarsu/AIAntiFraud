@@ -124,6 +124,7 @@ app.use('/api/cases', casesRoutes);
 app.use('/api/chargebacks', chargebacksRoutes);
 app.use('/api/refund-abuse-risk', require('./routes/refundAbuseRisk'));
 app.use('/api/governed-investigations', require('./routes/governedInvestigations'));
+app.use('/api', aiRateLimiter, require('./routes/generatedFeatures').router);
 
 // 404 handler
 app.use((req, res) => {

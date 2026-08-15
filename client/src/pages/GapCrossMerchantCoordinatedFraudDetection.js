@@ -1,3 +1,4 @@
+import GeneratedAiResponse from './GeneratedAiResponse';
 import React, { useState } from 'react';
 
 // v0 scaffold for: Cross-merchant coordinated-fraud detection
@@ -81,12 +82,8 @@ export default function CrossMerchantCoordinatedFraudDetectionPage() {
           {loading ? 'Running…' : 'Run'}
         </button>
       </div>
-      {error && <pre style={{ marginTop: '16px', color: '#c00', background: '#fee', padding: '12px', borderRadius: '6px' }}>{error}</pre>}
-      {result && (
-        <pre style={{ marginTop: '16px', background: '#f7f7f7', padding: '12px', borderRadius: '6px', overflow: 'auto', maxHeight: '480px' }}>
-          {JSON.stringify(result, null, 2)}
-        </pre>
-      )}
+      {error && <pre style={{ marginTop: '16px', color: '#c00', background: '#fee', padding: '12px', borderRadius: '6px', whiteSpace: 'pre-wrap' }}>{error}</pre>}
+      {result && <GeneratedAiResponse response={result} />}
     </div>
   );
 }
