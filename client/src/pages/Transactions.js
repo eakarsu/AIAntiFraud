@@ -29,6 +29,7 @@ export default function Transactions() {
   const [selected, setSelected] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [editItem, setEditItem] = useState(null);
   const [form, setForm] = useState({ ...emptyForm });
   const [aiResult, setAiResult] = useState(null);
@@ -69,7 +70,7 @@ export default function Transactions() {
   };
 
   const openEdit = (e, item) => {
-    e.stopPropagation();
+    e?.stopPropagation();
     setEditItem(item);
     setForm({
       amount: item.amount || '',
@@ -89,12 +90,18 @@ export default function Transactions() {
     setShowForm(true);
   };
 
-  const handleDelete = async (e, item) => {
-    e.stopPropagation();
-    if (!window.confirm(`Delete transaction #${item.id}?`)) return;
+  const requestDelete = (e, item) => {
+    e?.stopPropagation();
+    setDeleteTarget(item);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
     try {
-      await api.delete(`/transactions/${item.id}`);
+      await api.delete(`/transactions/${deleteTarget.id}`);
       toast.success('Transaction deleted');
+      setDeleteTarget(null);
+      setShowDetail(false);
       loadItems(pagination.page);
     } catch (err) {
       toast.error('Failed to delete');
@@ -172,7 +179,7 @@ export default function Transactions() {
                   <td>{t.createdAt ? new Date(t.createdAt).toLocaleDateString() : '-'}</td>
                   <td className="table-actions" onClick={e => e.stopPropagation()}>
                     <button className="btn btn-secondary btn-sm" onClick={e => openEdit(e, t)}><FiEdit2 /></button>
-                    <button className="btn btn-danger btn-sm" onClick={e => handleDelete(e, t)}><FiTrash2 /></button>
+                    <button className="btn btn-danger btn-sm" onClick={e => requestDelete(e, t)}><FiTrash2 /></button>
                   </td>
                 </tr>
               ))}
@@ -219,6 +226,24 @@ export default function Transactions() {
               </div>
               {aiLoading && <div className="ai-loading"><div className="spinner"></div>Running AI analysis...</div>}
               {aiResult && <AIResultsDisplay data={aiResult} title="AI Transaction Analysis" />}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowDetail(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={e => { setShowDetail(false); openEdit(e, selected); }}><FiEdit2 /> Edit</button>
+              <button className="btn btn-danger" onClick={e => requestDelete(e, selected)}><FiTrash2 /> Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="modal-overlay" onClick={() => setDeleteTarget(null)}>
+          <div className="modal" role="alertdialog" aria-modal="true" onClick={e => e.stopPropagation()} style={{ maxWidth: 440 }}>
+            <div className="modal-header"><h3>Delete transaction?</h3></div>
+            <div className="modal-body">Transaction #{deleteTarget.id} will be permanently removed from PostgreSQL.</div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setDeleteTarget(null)}>Cancel</button>
+              <button className="btn btn-danger" onClick={confirmDelete}>Delete</button>
             </div>
           </div>
         </div>

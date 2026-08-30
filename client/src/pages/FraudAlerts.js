@@ -26,6 +26,7 @@ export default function FraudAlerts() {
   const [selected, setSelected] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [editItem, setEditItem] = useState(null);
   const [form, setForm] = useState({ ...emptyForm });
 
@@ -56,7 +57,7 @@ export default function FraudAlerts() {
   const openNew = () => { setEditItem(null); setForm({ ...emptyForm }); setShowForm(true); };
 
   const openEdit = (e, item) => {
-    e.stopPropagation();
+    e?.stopPropagation();
     setEditItem(item);
     setForm({
       alertType: item.alertType || '',
@@ -70,12 +71,18 @@ export default function FraudAlerts() {
     setShowForm(true);
   };
 
-  const handleDelete = async (e, item) => {
-    e.stopPropagation();
-    if (!window.confirm('Delete this alert?')) return;
+  const requestDelete = (e, item) => {
+    e?.stopPropagation();
+    setDeleteTarget(item);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
     try {
-      await api.delete(`/fraud-alerts/${item.id}`);
+      await api.delete(`/fraud-alerts/${deleteTarget.id}`);
       toast.success('Alert deleted');
+      setDeleteTarget(null);
+      setShowDetail(false);
       loadItems(pagination.page);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to delete');
@@ -155,7 +162,7 @@ export default function FraudAlerts() {
                   <td className="table-actions" onClick={e => e.stopPropagation()}>
                     <button className="btn btn-secondary btn-sm" title="View Detail" onClick={e => { e.stopPropagation(); navigate(`/fraud-alerts/${a.id}`); }}><FiExternalLink /></button>
                     <button className="btn btn-secondary btn-sm" onClick={e => openEdit(e, a)}><FiEdit2 /></button>
-                    <button className="btn btn-danger btn-sm" onClick={e => handleDelete(e, a)}><FiTrash2 /></button>
+                    <button className="btn btn-danger btn-sm" onClick={e => requestDelete(e, a)}><FiTrash2 /></button>
                   </td>
                 </tr>
               ))}
@@ -205,6 +212,24 @@ export default function FraudAlerts() {
                   <option value="dismissed">Dismissed</option>
                 </select>
               </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowDetail(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={e => { setShowDetail(false); openEdit(e, selected); }}><FiEdit2 /> Edit</button>
+              <button className="btn btn-danger" onClick={e => requestDelete(e, selected)}><FiTrash2 /> Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="modal-overlay" onClick={() => setDeleteTarget(null)}>
+          <div className="modal" role="alertdialog" aria-modal="true" onClick={e => e.stopPropagation()} style={{ maxWidth: 440 }}>
+            <div className="modal-header"><h3>Delete fraud alert?</h3></div>
+            <div className="modal-body">Alert #{deleteTarget.id} will be permanently removed from PostgreSQL.</div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setDeleteTarget(null)}>Cancel</button>
+              <button className="btn btn-danger" onClick={confirmDelete}>Delete</button>
             </div>
           </div>
         </div>
