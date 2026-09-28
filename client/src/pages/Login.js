@@ -69,7 +69,7 @@ export default function Login() {
               {loading ? 'Signing in...' : 'Sign In'}
             </button>
             <button type="button" className="btn-quick" onClick={quickLogin}>
-              Quick Login (Demo Account)
+              Auto Fill Demo Credentials
             </button>
           </form>
         </div>
