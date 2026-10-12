@@ -1020,7 +1020,54 @@ tbody td:first-child {
   font-size: 13px;
   color: var(--text-primary);
   text-align: right;
-  max-width: 60%;
+  max-width: 65%;
+  overflow-wrap: anywhere;
+}
+
+.ai-kv-value .ai-nested-object,
+.ai-kv-value .ai-table-wrap,
+.ai-kv-value .ai-list {
+  text-align: left;
+  width: 100%;
+}
+
+.ai-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.ai-json-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.ai-json-table th,
+.ai-json-table td {
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-color);
+  white-space: normal;
+}
+
+.ai-json-table th {
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.ai-json-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.ai-empty-value {
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 .ai-loading {

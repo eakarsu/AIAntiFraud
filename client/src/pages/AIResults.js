@@ -7,6 +7,12 @@ import AIResultsDisplay from '../components/AIResultsDisplay';
 
 const LIMIT = 20;
 
+function parseStoredResult(value) {
+  if (typeof value !== 'string') return value;
+  try { return JSON.parse(value); }
+  catch (_) { return value; }
+}
+
 const ENDPOINTS = [
   '', 'analyze-transaction', 'credit-assessment', 'behavioral-analysis',
   'risk-report', 'merchant-screening', 'suggest-rules', 'score-transaction',
@@ -153,7 +159,7 @@ export default function AIResults() {
               </div>
               {selectedResult.result && (
                 <AIResultsDisplay
-                  data={typeof selectedResult.result === 'string' ? JSON.parse(selectedResult.result) : selectedResult.result}
+                  data={parseStoredResult(selectedResult.result)}
                   title="Stored AI Analysis"
                 />
               )}

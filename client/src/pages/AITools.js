@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import NativeAIControls from "../components/NativeAIControls.jsx";
+import React, { useEffect, useMemo, useState } from 'react';
 import { FiCpu, FiActivity, FiCreditCard, FiUsers, FiGlobe, FiUserCheck, FiBarChart2, FiZap, FiAlertTriangle, FiSettings, FiShare2, FiLayers } from 'react-icons/fi';
 import api from '../api';
 import AIResultsDisplay from '../components/AIResultsDisplay';
@@ -17,6 +18,41 @@ const TOOLS = [
   { key: 'graph-anomaly', label: 'Graph Anomaly', icon: FiShare2, description: 'In-memory graph anomaly scan over user/device/IP nodes.' },
   { key: 'cross-merchant-rings', label: 'Cross-Merchant Rings', icon: FiLayers, description: 'Detect fraud rings spanning multiple merchants.' },
 ];
+
+const PRESET_NAMES = ['Low-risk review', 'Elevated-risk review', 'Fraud-ring review'];
+
+function sourceValue(items, index, ...keys) {
+  const item = items[index % Math.max(items.length, 1)];
+  if (!item) return '';
+  for (const key of keys) if (item[key] !== undefined && item[key] !== null && item[key] !== '') return String(item[key]);
+  return '';
+}
+
+function toolPresetValues(tool, index, sources) {
+  const sets = {
+    'analyze-transaction': { transaction_id: sourceValue(sources.transactions, index, 'id') },
+    'credit-assessment': { credit_score_id: sourceValue(sources.creditScores, index, 'id') },
+    'behavioral-analysis': { pattern_id: sourceValue(sources.patterns, index, 'id') },
+    'risk-report': {},
+    'merchant-screening': { merchant_id: sourceValue(sources.merchants, index, 'id', '_id') },
+    'network-analysis': { days_back: ['14', '30', '90'][index], min_shared_attrs: ['2', '3', '4'][index] },
+    'customer-360': {
+      customer_id: sourceValue(sources.patterns, index, 'customerId', 'customer_id'),
+      user_id: sourceValue(sources.transactions, index, 'userId', 'user_id'),
+    },
+    'velocity-rules': {
+      velocity_user_id: sourceValue(sources.transactions, index, 'userId', 'user_id'),
+      velocity_hours: ['1', '4', '24'][index],
+      velocity_min_count: ['3', '5', '10'][index],
+      velocity_days_back: ['7', '30', '90'][index],
+    },
+    'money-mule-detection': { mule_days_back: ['14', '30', '90'][index], mule_min_total: ['1000', '5000', '10000'][index] },
+    'ml-rule-automation': { rule_days_back: ['14', '30', '90'][index], rule_min_hits: ['1', '3', '10'][index] },
+    'graph-anomaly': { graph_days_back: ['7', '14', '30'][index], graph_max_nodes: ['25', '50', '100'][index] },
+    'cross-merchant-rings': { ring_days_back: ['14', '30', '90'][index], ring_min_merchants: ['2', '3', '5'][index] },
+  };
+  return sets[tool] || {};
+}
 
 export default function AITools() {
   const [activeTool, setActiveTool] = useState('analyze-transaction');
@@ -45,6 +81,33 @@ export default function AITools() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [sources, setSources] = useState({ transactions: [], creditScores: [], patterns: [], merchants: [] });
+
+  useEffect(() => {
+    let active = true;
+    const requests = [
+      ['transactions', '/transactions'],
+      ['creditScores', '/credit-scores'],
+      ['patterns', '/behavioral-patterns'],
+      ['merchants', '/merchant-profiles'],
+    ];
+    Promise.allSettled(requests.map(([, endpoint]) => api.get(endpoint, { params: { page: 1, limit: 3 } }))).then((responses) => {
+      if (!active) return;
+      setSources(Object.fromEntries(requests.map(([key], index) => [key, responses[index].status === 'fulfilled' ? (responses[index].value.data?.data || []) : []])));
+    });
+    return () => { active = false; };
+  }, []);
+
+  const presets = useMemo(() => PRESET_NAMES.map((name, index) => ({
+    name,
+    fill: () => {
+      const candidate = toolPresetValues(activeTool, index, sources);
+      const values = Object.fromEntries(Object.entries(candidate).map(([key, value]) => [key, value || inputs[key] || '']));
+      const missing = Object.entries(values).filter(([, value]) => value === '').map(([key]) => key.replace(/_/g, ' '));
+      setInputs(previous => ({ ...previous, ...values }));
+      return { filled: Object.keys(values).length - missing.length, manual: missing };
+    },
+  })), [activeTool, inputs, sources]);
 
   const update = (k) => (e) => setInputs(prev => ({ ...prev, [k]: e.target.value }));
   const reset = () => { setResult(null); setError(null); };
@@ -119,7 +182,7 @@ export default function AITools() {
   const tool = TOOLS.find(t => t.key === activeTool);
 
   return (
-    <div>
+    <NativeAIControls busy={loading} context="AntiFraud" presets={presets}><div>
       <div className="page-header">
         <div>
           <h2><FiCpu style={{ verticalAlign: 'middle', marginRight: 8 }} />AI Tools</h2>
@@ -135,7 +198,11 @@ export default function AITools() {
             return (
               <div
                 key={t.key}
+                data-ai-tool={t.key}
+                role="button"
+                tabIndex={0}
                 onClick={() => { setActiveTool(t.key); reset(); }}
+                onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setActiveTool(t.key); reset(); } }}
                 style={{
                   padding: '10px 12px',
                   cursor: 'pointer',
@@ -251,11 +318,11 @@ export default function AITools() {
           )}
 
           {result && result.data && (
-            <AIResultsDisplay result={typeof result.data === 'object' ? result.data : { content: result.data }} />
+            <AIResultsDisplay data={typeof result.data === 'object' ? result.data : { content: result.data }} />
           )}
         </div>
       </div>
-    </div>
+    </div></NativeAIControls>
   );
 }
 
@@ -265,7 +332,7 @@ function FieldInput({ label, required, type = 'text', value, onChange }) {
       <label style={{ display: 'block', fontSize: 12, color: '#cbd5e1', marginBottom: 4 }}>
         {label}{required && <span style={{ color: '#f87171' }}> *</span>}
       </label>
-      <input
+      <input data-ai-field={typeof label === 'string' ? label.replace(/\([^)]*\)/g, '').trim().toLowerCase().replace(/\s+/g, '_') : 'value'}
         type={type}
         value={value}
         onChange={onChange}

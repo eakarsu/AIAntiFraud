@@ -9,6 +9,7 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
   const navigate = useNavigate();
   const { login } = useAuth();
 
@@ -32,9 +33,26 @@ export default function Login() {
     }
   };
 
-  const quickLogin = () => {
-    setEmail(process.env.REACT_APP_DEMO_EMAIL || '');
-    setPassword(process.env.REACT_APP_DEMO_PASSWORD || '');
+  const fillDemoCredentials = async () => {
+    if (demoLoading) return;
+    setDemoLoading(true);
+    try {
+      let demoEmail = process.env.REACT_APP_DEMO_EMAIL || '';
+      let demoPassword = process.env.REACT_APP_DEMO_PASSWORD || '';
+      if (!demoEmail || !demoPassword) {
+        const response = await api.get('/auth/demo-credentials');
+        demoEmail = response.data?.email || '';
+        demoPassword = response.data?.password || '';
+      }
+      if (!demoEmail || !demoPassword) throw new Error('Demo credentials are not configured');
+      setEmail(demoEmail);
+      setPassword(demoPassword);
+      toast.info('Demo credentials filled. Review them, then sign in.');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Demo credentials are not enabled for this environment');
+    } finally {
+      setDemoLoading(false);
+    }
   };
 
   return (
@@ -68,8 +86,8 @@ export default function Login() {
             <button type="submit" className="btn btn-primary" disabled={loading}>
               {loading ? 'Signing in...' : 'Sign In'}
             </button>
-            <button type="button" className="btn-quick" onClick={quickLogin}>
-              Auto Fill Demo Credentials
+            <button type="button" className="btn-quick" disabled={loading || demoLoading} onClick={fillDemoCredentials}>
+              {demoLoading ? 'Loading Demo Credentials...' : 'Fill Demo Credentials'}
             </button>
           </form>
         </div>

@@ -52,6 +52,36 @@ function getSectionClass(title) {
   return 'details';
 }
 
+function parseStructuredString(value) {
+  if (typeof value !== 'string') return value;
+  const candidate = value.trim().replace(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i, '$1');
+  if (!candidate.startsWith('{') && !candidate.startsWith('[')) return value;
+  try { return JSON.parse(candidate); }
+  catch (_) { return value; }
+}
+
+function StructuredValue({ value, depth = 0 }) {
+  const parsed = parseStructuredString(value);
+  if (parsed !== value) return <StructuredValue value={parsed} depth={depth} />;
+  if (value === null || value === undefined || value === '') return <span className="ai-empty-value">Not provided</span>;
+  if (typeof value === 'boolean') return <span>{value ? 'Yes' : 'No'}</span>;
+  if (typeof value !== 'object') return <span>{String(value)}</span>;
+  if (Array.isArray(value)) {
+    if (!value.length) return <span className="ai-empty-value">None reported</span>;
+    if (value.every(item => item === null || typeof item !== 'object')) {
+      return <ul className="ai-list">{value.map((item, index) => <li key={index}>{String(item)}</li>)}</ul>;
+    }
+    const tabular = value.every(item => item && typeof item === 'object' && !Array.isArray(item) && Object.values(item).every(cell => cell === null || typeof cell !== 'object'));
+    if (tabular) {
+      const columns = [...new Set(value.flatMap(item => Object.keys(item)))];
+      return <div className="ai-table-wrap"><table className="ai-json-table"><thead><tr>{columns.map(column => <th key={column}>{formatTitle(column)}</th>)}</tr></thead><tbody>{value.map((item, index) => <tr key={index}>{columns.map(column => <td key={column}><StructuredValue value={item[column]} depth={depth + 1} /></td>)}</tr>)}</tbody></table></div>;
+    }
+    return <div className="ai-cards-list">{value.map((item, index) => <ObjectCard key={index} obj={item} index={index} />)}</div>;
+  }
+  if (depth > 8) return <span>{String(value)}</span>;
+  return <NestedObject obj={value} depth={depth + 1} />;
+}
+
 // Render a single object as a card with key-value pairs
 function ObjectCard({ obj, index }) {
   if (!obj || typeof obj !== 'object') return <p>{String(obj)}</p>;
@@ -90,7 +120,7 @@ function ObjectCard({ obj, index }) {
         <div className="ai-card-meta">
           {otherEntries.map(([k, v]) => (
             <span key={k} className="ai-meta-item">
-              <strong>{formatTitle(k)}:</strong> {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+              <strong>{formatTitle(k)}:</strong> <StructuredValue value={v} depth={1} />
             </span>
           ))}
         </div>
@@ -100,7 +130,7 @@ function ObjectCard({ obj, index }) {
 }
 
 // Render a nested object as key-value list
-function NestedObject({ obj }) {
+function NestedObject({ obj, depth = 0 }) {
   if (!obj || typeof obj !== 'object') return <p>{String(obj || 'N/A')}</p>;
   const entries = Object.entries(obj);
   if (entries.length === 0) return <p>N/A</p>;
@@ -110,9 +140,9 @@ function NestedObject({ obj }) {
       {entries.map(([k, v]) => (
         <div key={k} className="ai-kv-row">
           <span className="ai-kv-label">{formatTitle(k)}</span>
-          <span className="ai-kv-value">
-            {v === null || v === undefined ? 'N/A' : typeof v === 'object' ? JSON.stringify(v) : String(v)}
-          </span>
+          <div className="ai-kv-value">
+            <StructuredValue value={v} depth={depth} />
+          </div>
         </div>
       ))}
     </div>
@@ -125,6 +155,16 @@ function renderSection(key, value) {
   // Skip raw_response if we also have real parsed fields
   if (key === 'raw_response' || key === 'rawResponse') return null;
 
+  const structured = parseStructuredString(value);
+  if (structured !== value) {
+    return (
+      <div key={key} className={`ai-section ${getSectionClass(title)}`}>
+        <div className="ai-section-title">{getSectionIcon(title)} {title}</div>
+        <StructuredValue value={structured} />
+      </div>
+    );
+  }
+
   // Primitive value
   if (value === null || value === undefined) return null;
   if (typeof value !== 'object') {
@@ -136,31 +176,12 @@ function renderSection(key, value) {
     );
   }
 
-  // Array of objects
   if (Array.isArray(value)) {
     if (value.length === 0) return null;
-
-    // Array of strings
-    if (value.every(v => typeof v !== 'object')) {
-      return (
-        <div key={key} className={`ai-section ${getSectionClass(title)}`}>
-          <div className="ai-section-title">{getSectionIcon(title)} {title}</div>
-          <ul className="ai-list">{value.map((v, i) => <li key={i}>{String(v)}</li>)}</ul>
-        </div>
-      );
-    }
-
-    // Array of objects - render as cards
     return (
       <div key={key} className={`ai-section ${getSectionClass(title)}`}>
         <div className="ai-section-title">{getSectionIcon(title)} {title} <span className="ai-count">({value.length})</span></div>
-        <div className="ai-cards-list">
-          {value.map((item, i) => (
-            typeof item === 'object' && item !== null
-              ? <ObjectCard key={i} obj={item} index={i} />
-              : <p key={i}>{String(item)}</p>
-          ))}
-        </div>
+        <StructuredValue value={value} />
       </div>
     );
   }
@@ -207,7 +228,8 @@ function parseMarkdownSections(text) {
 export default function AIResultsDisplay({ data, title = 'AI Analysis Results' }) {
   if (!data) return null;
 
-  const analysis = typeof data === 'object' && data.analysis ? data.analysis : data;
+  const source = typeof data === 'object' && data.analysis ? data.analysis : data;
+  const analysis = parseStructuredString(source);
 
   // Extract risk level for the badge
   let riskLevel = null;
@@ -220,9 +242,12 @@ export default function AIResultsDisplay({ data, title = 'AI Analysis Results' }
     else if (typeof rl === 'object' && rl?.overallRisk) riskLevel = rl.overallRisk;
   }
 
-  // Structured JSON object - render professionally
-  if (typeof analysis === 'object' && analysis !== null && !Array.isArray(analysis) && !analysis.raw_response && !analysis.rawResponse) {
-    const entries = Object.entries(analysis);
+  const structuredEntries = typeof analysis === 'object' && analysis !== null && !Array.isArray(analysis)
+    ? Object.entries(analysis).filter(([key]) => key !== 'raw_response' && key !== 'rawResponse')
+    : [];
+
+  // Structured JSON object - render professionally. Ignore a redundant raw copy.
+  if (structuredEntries.length) {
     return (
       <div className="ai-results">
         <div className="ai-results-header">
@@ -235,8 +260,17 @@ export default function AIResultsDisplay({ data, title = 'AI Analysis Results' }
               {String(riskLevel).toUpperCase().replace(/_/g, ' ')}
             </div>
           )}
-          {entries.map(([key, value]) => renderSection(key, value)).filter(Boolean)}
+          {structuredEntries.map(([key, value]) => renderSection(key, value)).filter(Boolean)}
         </div>
+      </div>
+    );
+  }
+
+  if (Array.isArray(analysis)) {
+    return (
+      <div className="ai-results">
+        <div className="ai-results-header"><FiCpu className="ai-icon" /><h4>{title}</h4></div>
+        <div className="ai-results-body"><StructuredValue value={analysis} /></div>
       </div>
     );
   }

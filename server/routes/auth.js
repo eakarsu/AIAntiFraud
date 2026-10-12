@@ -7,6 +7,33 @@ const { authenticateToken } = require('../middleware/auth');
 const router = express.Router();
 const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID || 'default';
 
+function configuredDemoCredentials(env = process.env) {
+  const pairs = [
+    ['DEMO_EMAIL', 'DEMO_PASSWORD'],
+    ['SEED_ADMIN_EMAIL', 'SEED_ADMIN_PASSWORD'],
+    ['PROVISION_ADMIN_EMAIL', 'PROVISION_ADMIN_PASSWORD'],
+    ['ADMIN_EMAIL', 'ADMIN_PASSWORD'],
+    ['DEFAULT_EMAIL', 'DEFAULT_PASSWORD'],
+  ];
+  for (const [emailKey, passwordKey] of pairs) {
+    const email = env[emailKey]?.trim();
+    const password = env[passwordKey];
+    if (email && password) return { email, password };
+  }
+  return null;
+}
+
+// GET /api/auth/demo-credentials — explicit local-demo opt-in only.
+router.get('/demo-credentials', (req, res) => {
+  if (process.env.NODE_ENV === 'production' || process.env.ENABLE_DEMO_CREDENTIAL_AUTOFILL !== 'true') {
+    return res.status(404).json({ message: 'Demo credentials are not enabled for this environment' });
+  }
+  const credentials = configuredDemoCredentials();
+  if (!credentials) return res.status(404).json({ message: 'No complete demo account is configured' });
+  res.set('Cache-Control', 'no-store');
+  return res.json(credentials);
+});
+
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
   try {

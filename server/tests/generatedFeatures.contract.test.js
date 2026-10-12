@@ -12,6 +12,8 @@ test('every generated fraud page has an allowlisted backend feature', () => {
     .filter((name) => /^(?:Cf|Gap).+\.js$/.test(name))
     .flatMap((name) => {
       const source = fs.readFileSync(path.join(pagesDir, name), 'utf8');
+      const workspaceFeature = source.match(/const feature\s*=\s*\{[^;]*"id":"([^"]+)"/s)?.[1];
+      if (workspaceFeature) return [workspaceFeature];
       return [...source.matchAll(/fetch\(['"]\/api\/([^'"]+)\/run['"]/g)].map((match) => match[1]);
     });
 
