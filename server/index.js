@@ -122,6 +122,9 @@ app.use('/api/users', usersRoutes);
 app.use('/api/rule-suggestions', ruleSuggestionsRoutes);
 app.use('/api/cases', casesRoutes);
 app.use('/api/chargebacks', chargebacksRoutes);
+app.use('/api/featurepack', require('./middleware/auth').authenticateToken, require('./featurepack').createFeaturePackRouter({
+  listRecords: async () => (await require('./db').query('SELECT * FROM transactions ORDER BY created_at DESC LIMIT 200')).rows,
+}));
 app.use('/api/refund-abuse-risk', require('./routes/refundAbuseRisk'));
 app.use('/api/governed-investigations', require('./routes/governedInvestigations'));
 app.use('/api', aiRateLimiter, require('./routes/generatedFeatures').router);
